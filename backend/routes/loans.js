@@ -212,7 +212,7 @@ router.post('/', authenticate, [
     }
 
     const loanCalculation = require('../services/loanCalculation');
-    const { getLoanTypeConfig, calculateUpfrontAmount, calculatePrincipalAmount } = require('../config/loanTypes');
+    const { getLoanTypeConfig, calculateUpfrontAmount } = require('../config/loanTypes');
     
     // Generate unique loan number (check for existing numbers to avoid duplicates)
     let loanNumber;
@@ -311,7 +311,7 @@ router.post('/', authenticate, [
 
     // Handle different loan types
     // Personal and Excess: 10% interest on loan amount, no upfront
-    // Other loans: upfront is a fee, interest is calculated on principal
+    // Other loans: upfront is a fee, interest is calculated on full loan amount
     let scheduleData;
     let totalInterest;
     let totalAmount;
@@ -360,13 +360,13 @@ router.post('/', authenticate, [
       // Total amount = loan amount + interest
       totalAmount = scheduleData.total_amount || loanAmount;
     } else {
-      // Other loan types: Upfront is a fee, interest is calculated on principal
+      // Other loan types: upfront is a fee, interest is calculated on full loan amount
       // Calculate upfront percentage and amount
       upfrontPercentage = parseFloat(req.body.upfront_percentage) || loanTypeConfig.upfrontPercentage;
       upfrontAmount = calculateUpfrontAmount(loanAmount, upfrontPercentage);
       
-      // Calculate principal amount (after upfront deduction)
-      principal = calculatePrincipalAmount(loanAmount, upfrontAmount);
+      // Principal remains the full loan amount (do not deduct upfront)
+      principal = loanAmount;
       
       // Get default charges (only for Emergency and Micro loans)
       defaultChargesPercentage = loanTypeConfig.hasDefaultCharges 
@@ -376,7 +376,7 @@ router.post('/', authenticate, [
         ? (principal * defaultChargesPercentage / 100)
         : 0;
       
-      // Generate repayment schedule based on principal
+      // Generate repayment schedule based on full loan amount
       try {
         scheduleData = loanCalculation.generateRepaymentSchedule(
           principal,
@@ -401,7 +401,7 @@ router.post('/', authenticate, [
         });
       }
       
-      // Total interest = schedule interest (calculated on principal)
+      // Total interest = schedule interest (calculated on full loan amount)
       totalInterest = scheduleData.total_interest || 0;
       // Total amount = principal + schedule interest + default charges
       totalAmount = (scheduleData.total_amount || principal) + defaultChargesAmount;
@@ -483,7 +483,7 @@ router.post('/', authenticate, [
         loan_number: loanNumber,
         client_id: clientId, // Already validated and parsed
         amount: loanAmount, // Total loan amount requested
-        principal_amount: principal, // Principal after upfront deduction
+        principal_amount: principal, // Principal equals full loan amount
         interest_rate: interestRate,
         term_months: termMonths,
         loan_type: loanType,
@@ -725,7 +725,7 @@ router.post('/:id/disburse', authenticate, authorize('admin', 'branch_manager', 
 router.post('/calculate-schedule', authenticate, async (req, res) => {
   try {
     const loanCalculation = require('../services/loanCalculation');
-    const { getLoanTypeConfig, calculateUpfrontAmount, calculatePrincipalAmount } = require('../config/loanTypes');
+    const { getLoanTypeConfig, calculateUpfrontAmount } = require('../config/loanTypes');
     
     const { 
       loan_amount, 
@@ -739,7 +739,7 @@ router.post('/calculate-schedule', authenticate, async (req, res) => {
       default_charges_percentage
     } = req.body;
 
-    // If loan_amount and upfront_percentage are provided, calculate principal
+    // If loan_amount and upfront_percentage are provided, calculate upfront
     let principal = parseFloat(req.body.principal) || 0;
     let upfrontAmount = 0;
     let totalInterest = 0;
@@ -749,7 +749,7 @@ router.post('/calculate-schedule', authenticate, async (req, res) => {
       const loanAmount = parseFloat(loan_amount);
       const upfrontPct = parseFloat(upfront_percentage);
       upfrontAmount = calculateUpfrontAmount(loanAmount, upfrontPct);
-      principal = calculatePrincipalAmount(loanAmount, upfrontAmount);
+      principal = loanAmount; // Principal remains full loan amount
     }
 
     if (!principal || principal <= 0) {

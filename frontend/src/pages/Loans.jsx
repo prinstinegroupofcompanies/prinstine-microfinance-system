@@ -121,9 +121,9 @@ const Loans = () => {
     return (parseFloat(loanAmount) * parseFloat(upfrontPercentage)) / 100;
   };
 
-  // Calculate principal amount (after upfront deduction)
-  const calculatePrincipal = (loanAmount, upfrontAmount) => {
-    return Math.max(0, parseFloat(loanAmount) - parseFloat(upfrontAmount));
+  // Principal remains the full loan amount (upfront is a fee)
+  const calculatePrincipal = (loanAmount) => {
+    return Math.max(0, parseFloat(loanAmount));
   };
 
   // Calculate default charges amount
