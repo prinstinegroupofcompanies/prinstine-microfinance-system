@@ -1217,18 +1217,9 @@ router.post('/:id/repay', authenticate, [
   }
 });
 
-// Update loan
-router.put('/:id', authenticate, [
-  body('amount').optional().isFloat({ min: 0 }),
-  body('interest_rate').optional().isFloat({ min: 0, max: 100 }),
-  body('term_months').optional().isInt({ min: 1 })
-], async (req, res) => {
+// Update loan – admin or head_micro_loan only; robust parsing and validation
+router.put('/:id', authenticate, authorize('admin', 'head_micro_loan'), async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ success: false, errors: errors.array() });
-    }
-
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {
       return res.status(404).json({
@@ -1238,14 +1229,55 @@ router.put('/:id', authenticate, [
     }
 
     const loanCalculation = require('../services/loanCalculation');
-    const principal = parseFloat(req.body.amount ?? loan.amount);
-    const interestRate = parseFloat(req.body.interest_rate ?? loan.interest_rate);
-    const termMonths = parseInt(req.body.term_months ?? loan.term_months, 10);
-      const interestMethod = req.body.interest_method || loan.interest_method || 'declining_balance';
-      const paymentFrequency = req.body.payment_frequency || loan.payment_frequency || 'monthly';
-      const disbursementDate = loan.disbursement_date || loan.application_date || new Date().toISOString().split('T')[0];
 
-      const scheduleData = loanCalculation.generateRepaymentSchedule(
+    const toNum = (v, def) => {
+      if (v === undefined || v === null || v === '') return def;
+      const n = typeof v === 'number' ? v : parseFloat(v);
+      return Number.isFinite(n) ? n : def;
+    };
+    const toInt = (v, def) => {
+      if (v === undefined || v === null || v === '') return def;
+      const n = typeof v === 'number' ? v : parseInt(v, 10);
+      return Number.isInteger(n) ? n : def;
+    };
+
+    const loanAmount = toNum(loan.amount, 0);
+    const loanRate = toNum(loan.interest_rate, 0);
+    const loanTerm = toInt(loan.term_months, 1);
+
+    const principal = toNum(req.body.amount, loanAmount);
+    const interestRate = toNum(req.body.interest_rate, loanRate);
+    const termMonths = toInt(req.body.term_months, loanTerm);
+
+    if (principal <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Loan amount must be greater than zero',
+        errors: [{ param: 'amount', msg: 'Valid amount is required' }]
+      });
+    }
+    if (interestRate < 0 || interestRate > 100) {
+      return res.status(400).json({
+        success: false,
+        message: 'Interest rate must be between 0 and 100',
+        errors: [{ param: 'interest_rate', msg: 'Valid interest rate is required' }]
+      });
+    }
+    if (termMonths < 1) {
+      return res.status(400).json({
+        success: false,
+        message: 'Term must be at least 1 month',
+        errors: [{ param: 'term_months', msg: 'Valid term is required' }]
+      });
+    }
+
+    const interestMethod = req.body.interest_method || loan.interest_method || 'declining_balance';
+    const paymentFrequency = req.body.payment_frequency || loan.payment_frequency || 'monthly';
+    const disbursementDate = loan.disbursement_date || loan.application_date || new Date().toISOString().split('T')[0];
+
+    let scheduleData;
+    try {
+      scheduleData = loanCalculation.generateRepaymentSchedule(
         principal,
         interestRate,
         termMonths,
@@ -1253,12 +1285,19 @@ router.put('/:id', authenticate, [
         paymentFrequency,
         disbursementDate
       );
+    } catch (calcError) {
+      console.error('Schedule calculation error:', calcError);
+      return res.status(400).json({
+        success: false,
+        message: calcError.message || 'Invalid loan terms for schedule calculation',
+        errors: []
+      });
+    }
 
-      // Delete old repayments
-      await db.LoanRepayment.destroy({ where: { loan_id: loan.id } });
+    await db.LoanRepayment.destroy({ where: { loan_id: loan.id } });
 
-      // Create new repayments
-      for (const scheduleItem of scheduleData.schedule) {
+    const schedule = Array.isArray(scheduleData.schedule) ? scheduleData.schedule : [];
+    for (const scheduleItem of schedule) {
         await db.LoanRepayment.create({
           loan_id: loan.id,
           repayment_number: `${loan.loan_number}-${String(scheduleItem.installment_number).padStart(3, '0')}`,
@@ -1271,15 +1310,16 @@ router.put('/:id', authenticate, [
           status: 'pending',
           created_by: req.userId
         });
-      }
+    }
 
     const loanTypeConfig = getLoanTypeConfig(req.body.loan_type || loan.loan_type);
     const defaultChargesPct = loanTypeConfig.hasDefaultCharges
-      ? (parseFloat(req.body.default_charges_percentage ?? loan.default_charges_percentage) || 0)
+      ? toNum(req.body.default_charges_percentage, toNum(loan.default_charges_percentage, 0))
       : 0;
     const defaultChargesAmount = principal * (defaultChargesPct / 100);
     const totalAmount = (scheduleData.total_amount || 0) + defaultChargesAmount;
-    const outstandingBalance = totalAmount;
+    const totalPaid = toNum(loan.total_paid, 0);
+    const outstandingBalance = Math.max(0, totalAmount - totalPaid);
 
     const updatePayload = {
       amount: principal,
@@ -1292,7 +1332,7 @@ router.put('/:id', authenticate, [
       total_interest: scheduleData.total_interest || 0,
       total_amount: totalAmount,
       outstanding_balance: outstandingBalance,
-      repayment_schedule: JSON.stringify(scheduleData.schedule || []),
+      repayment_schedule: JSON.stringify(schedule),
       default_charges_percentage: defaultChargesPct,
       default_charges_amount: defaultChargesAmount
     };
@@ -1301,8 +1341,16 @@ router.put('/:id', authenticate, [
     if (req.body.loan_type !== undefined) updatePayload.loan_type = req.body.loan_type;
     if (req.body.currency !== undefined) updatePayload.currency = req.body.currency || 'USD';
     if (req.body.disbursement_date !== undefined) updatePayload.disbursement_date = req.body.disbursement_date || null;
-    if (req.body.branch_id !== undefined) updatePayload.branch_id = req.body.branch_id === '' || req.body.branch_id === null ? null : parseInt(req.body.branch_id, 10);
-    if (req.body.collateral_id !== undefined) updatePayload.collateral_id = req.body.collateral_id === '' || req.body.collateral_id === null ? null : parseInt(req.body.collateral_id, 10);
+    if (req.body.branch_id !== undefined) {
+      const b = req.body.branch_id;
+      const bId = (b === '' || b === null) ? null : (Number.isInteger(b) ? b : parseInt(b, 10));
+      updatePayload.branch_id = (bId !== undefined && !Number.isNaN(bId)) ? bId : null;
+    }
+    if (req.body.collateral_id !== undefined) {
+      const c = req.body.collateral_id;
+      const cId = (c === '' || c === null) ? null : (Number.isInteger(c) ? c : parseInt(c, 10));
+      updatePayload.collateral_id = (cId !== undefined && !Number.isNaN(cId)) ? cId : null;
+    }
 
     await loan.update(updatePayload);
 

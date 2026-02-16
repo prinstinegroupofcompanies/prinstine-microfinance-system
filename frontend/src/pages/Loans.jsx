@@ -252,31 +252,40 @@ const Loans = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      // Prepare data with proper types
-      const submitData = {
-        client_id: parseInt(formData.client_id),
-        amount: parseFloat(formData.amount),
-        currency: formData.currency || 'USD', // Include currency
-        interest_rate: parseFloat(formData.interest_rate),
-        upfront_percentage: parseFloat(formData.upfront_percentage) || 0,
-        default_charges_percentage: parseFloat(formData.default_charges_percentage) || 0,
-        term_months: parseInt(formData.term_months),
-        loan_type: formData.loan_type,
-        payment_frequency: formData.payment_frequency,
-        interest_method: formData.interest_method,
-        loan_purpose: formData.loan_purpose || null,
-        collateral_id: formData.collateral_id ? parseInt(formData.collateral_id) : null,
-        disbursement_date: formData.disbursement_date || new Date().toISOString().split('T')[0],
-        branch_id: formData.branch_id ? parseInt(formData.branch_id) : null,
-        notes: formData.notes || null
+      const num = (v, fallback) => {
+        const n = parseFloat(v);
+        return Number.isFinite(n) ? n : (fallback != null ? parseFloat(fallback) : undefined);
+      };
+      const int = (v, fallback) => {
+        const n = parseInt(v, 10);
+        return Number.isInteger(n) ? n : (fallback != null ? parseInt(fallback, 10) : undefined);
       };
 
-      // Validate required fields
+      const submitData = {
+        client_id: editingLoan ? editingLoan.client_id : int(formData.client_id),
+        amount: num(formData.amount, editingLoan?.amount),
+        currency: formData.currency || 'USD',
+        interest_rate: num(formData.interest_rate, editingLoan?.interest_rate),
+        upfront_percentage: num(formData.upfront_percentage, editingLoan?.upfront_percentage) ?? 0,
+        default_charges_percentage: num(formData.default_charges_percentage, editingLoan?.default_charges_percentage) ?? 0,
+        term_months: int(formData.term_months, editingLoan?.term_months),
+        loan_type: formData.loan_type || (editingLoan?.loan_type || 'personal'),
+        payment_frequency: formData.payment_frequency || (editingLoan?.payment_frequency || 'monthly'),
+        interest_method: formData.interest_method || (editingLoan?.interest_method || 'declining_balance'),
+        loan_purpose: formData.loan_purpose || null,
+        collateral_id: formData.collateral_id ? parseInt(formData.collateral_id, 10) : (editingLoan?.collateral_id ?? null),
+        disbursement_date: formData.disbursement_date || (editingLoan?.disbursement_date || editingLoan?.application_date) || new Date().toISOString().split('T')[0],
+        branch_id: formData.branch_id ? parseInt(formData.branch_id, 10) : (editingLoan?.branch_id ?? null),
+        notes: formData.notes ?? null
+      };
+
       const missingFields = [];
-      if (!submitData.client_id || isNaN(submitData.client_id)) missingFields.push('Client');
-      if (!submitData.amount || isNaN(submitData.amount) || submitData.amount <= 0) missingFields.push('Loan Amount');
-      if (submitData.interest_rate === undefined || submitData.interest_rate === null || isNaN(submitData.interest_rate) || submitData.interest_rate < 0) missingFields.push('Interest Rate');
-      if (!submitData.term_months || isNaN(submitData.term_months) || submitData.term_months < 1) missingFields.push('Term (months)');
+      if (!editingLoan) {
+        if (!submitData.client_id || isNaN(submitData.client_id)) missingFields.push('Client');
+      }
+      if (!Number.isFinite(submitData.amount) || submitData.amount <= 0) missingFields.push('Loan Amount');
+      if (!Number.isFinite(submitData.interest_rate) || submitData.interest_rate < 0) missingFields.push('Interest Rate');
+      if (!Number.isInteger(submitData.term_months) || submitData.term_months < 1) missingFields.push('Term (months)');
 
       if (missingFields.length > 0) {
         toast.error(`Please fill in all required fields: ${missingFields.join(', ')}`);
@@ -337,27 +346,17 @@ const Loans = () => {
       
       if (error.response?.data) {
         const errorData = error.response.data;
-        
-        // Handle validation errors array
-        if (errorData.errors && Array.isArray(errorData.errors)) {
+        if (errorData.message) errorMessage = errorData.message;
+        if (errorData.errors && Array.isArray(errorData.errors) && errorData.errors.length > 0) {
           const validationErrors = errorData.errors
-            .map(e => {
-              if (typeof e === 'string') return e;
-              if (e.msg) return `${e.param || 'Field'}: ${e.msg}`;
-              if (e.message) return e.message;
-              return JSON.stringify(e);
-            })
+            .map(e => (e && e.msg ? `${e.param || 'Field'}: ${e.msg}` : (typeof e === 'string' ? e : e?.message)))
             .filter(Boolean)
             .join(', ');
-          errorMessage = validationErrors || errorData.message || errorMessage;
-        } else if (errorData.message) {
-          errorMessage = errorData.message;
-        } else if (errorData.error) {
-          errorMessage = typeof errorData.error === 'string' ? errorData.error : JSON.stringify(errorData.error);
+          if (validationErrors) errorMessage = validationErrors;
         }
-      } else if (error.message) {
-        errorMessage = error.message;
+        if (!errorMessage && errorData.error) errorMessage = typeof errorData.error === 'string' ? errorData.error : String(errorData.error);
       }
+      if (!errorMessage && error.message) errorMessage = error.message;
       
       // Ensure error message is not empty or too short
       if (!errorMessage || errorMessage.length < 3) {
@@ -391,7 +390,7 @@ const Loans = () => {
   const handleEdit = async (loanId) => {
     try {
       const response = await apiClient.get(`/api/loans/${loanId}`);
-      const loan = response.data.data.loan;
+      const loan = response.data.data?.loan ?? response.data.loan;
       setEditingLoan(loan);
       setFormData({
         client_id: loan.client_id || '',
@@ -769,7 +768,7 @@ const Loans = () => {
                             >
                               <i className="fas fa-eye"></i>
                             </Link>
-                            {user?.role !== 'borrower' && user?.role === 'admin' && (
+                            {['admin', 'head_micro_loan'].includes(user?.role) && (
                               <button
                                 className="btn btn-sm btn-outline-primary"
                                 onClick={() => handleEdit(loan.id)}
