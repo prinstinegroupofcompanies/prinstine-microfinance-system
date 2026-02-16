@@ -69,6 +69,16 @@ const Savings = () => {
     }
   };
 
+  const handleApproveSavings = async (accountId) => {
+    try {
+      await apiClient.post(`/api/savings/${accountId}/approve`);
+      toast.success('Savings account approved successfully');
+      fetchSavings();
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Failed to approve savings account');
+    }
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -325,7 +335,7 @@ const Savings = () => {
                         </td>
                         <td>{account.interest_rate || 0}%</td>
                         <td>
-                          <span className={`badge bg-${account.status === 'active' ? 'success' : 'secondary'}`}>
+                          <span className={`badge bg-${account.status === 'active' ? 'success' : account.status === 'pending' ? 'warning' : 'secondary'}`}>
                             {account.status}
                           </span>
                         </td>
@@ -340,6 +350,15 @@ const Savings = () => {
                             </Link>
                             {user?.role !== 'borrower' && (
                               <>
+                                {['admin', 'head_micro_loan', 'supervisor'].includes(user?.role) && account.status === 'pending' && (
+                                  <button
+                                    className="btn btn-sm btn-outline-success"
+                                    onClick={() => handleApproveSavings(account.id)}
+                                    title="Approve account"
+                                  >
+                                    <i className="fas fa-check"></i>
+                                  </button>
+                                )}
                                 <button 
                                   className="btn btn-sm btn-outline-primary"
                                   onClick={() => handleEdit(account.id)}
@@ -354,6 +373,7 @@ const Savings = () => {
                                     setShowDepositModal(true);
                                   }}
                                   title="Deposit"
+                                  disabled={account.status !== 'active'}
                                 >
                                   <i className="fas fa-plus"></i>
                                 </button>
@@ -364,7 +384,7 @@ const Savings = () => {
                                     setShowWithdrawModal(true);
                                   }}
                                   title="Withdraw"
-                                  disabled={parseFloat(account.balance || 0) <= 0}
+                                  disabled={account.status !== 'active' || parseFloat(account.balance || 0) <= 0}
                                 >
                                   <i className="fas fa-minus"></i>
                                 </button>

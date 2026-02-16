@@ -7,8 +7,8 @@ const router = express.Router();
 
 router.use(authenticate);
 
-// Get all revenue (admin only)
-router.get('/', authorize('admin', 'finance', 'general_manager'), async (req, res) => {
+// Get all revenue (admin, finance, general_manager, head_micro_loan, supervisor)
+router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loan', 'supervisor'), async (req, res) => {
   try {
     const { startDate, endDate, source } = req.query;
     
@@ -92,7 +92,7 @@ router.get('/', authorize('admin', 'finance', 'general_manager'), async (req, re
 });
 
 // Get revenue summary/statistics
-router.get('/summary', authorize('admin', 'finance', 'general_manager'), async (req, res) => {
+router.get('/summary', authorize('admin', 'finance', 'general_manager', 'head_micro_loan', 'supervisor'), async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
     

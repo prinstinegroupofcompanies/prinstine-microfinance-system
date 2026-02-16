@@ -665,7 +665,8 @@ router.post('/', authenticate, [
 });
 
 // Approve loan
-router.post('/:id/approve', authenticate, authorize('admin', 'branch_manager', 'general_manager', 'micro_loan_officer', 'head_micro_loan', 'supervisor'), async (req, res) => {
+// Only supervisor, head_micro_loan, or admin can approve loans (not micro_loan_officer)
+router.post('/:id/approve', authenticate, authorize('admin', 'head_micro_loan', 'supervisor'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {
@@ -1030,14 +1031,16 @@ router.post('/:id/repay', authenticate, [
     // Update repayment with transaction ID
     await nextRepayment.update({ transaction_id: transaction.id });
 
-    // Handle interest distribution if interest amount > 0 and loan type is personal or excess
-    if (interestAmount > 0 && (loan.loan_type === 'personal' || loan.loan_type === 'excess')) {
+    // Handle interest distribution: 50% loan owner, 20% company (revenue), 30% users with savings
+    if (interestAmount > 0) {
       const { getLoanTypeConfig } = require('../config/loanTypes');
       const loanTypeConfig = getLoanTypeConfig(loan.loan_type);
-      
-      // Get interest distribution configuration
-      if (loanTypeConfig.interestDistribution) {
-        const { admin, client, general } = loanTypeConfig.interestDistribution;
+      const distribution = loanTypeConfig.interestDistribution || { admin: 0.20, client: 0.50, general: 0.30 };
+
+      if (distribution.admin !== undefined || distribution.client !== undefined || distribution.general !== undefined) {
+        const admin = distribution.admin !== undefined ? distribution.admin : 0.20;
+        const client = distribution.client !== undefined ? distribution.client : 0.50;
+        const general = distribution.general !== undefined ? distribution.general : 0.30;
         
         // Calculate shares
         const adminShare = interestAmount * admin;
@@ -1234,12 +1237,10 @@ router.put('/:id', authenticate, [
       });
     }
 
-    // If loan amount, interest rate, or term changed, regenerate schedule
-    if (req.body.amount || req.body.interest_rate || req.body.term_months) {
-      const loanCalculation = require('../services/loanCalculation');
-      const principal = parseFloat(req.body.amount || loan.amount);
-      const interestRate = parseFloat(req.body.interest_rate || loan.interest_rate);
-      const termMonths = parseInt(req.body.term_months || loan.term_months);
+    const loanCalculation = require('../services/loanCalculation');
+    const principal = parseFloat(req.body.amount ?? loan.amount);
+    const interestRate = parseFloat(req.body.interest_rate ?? loan.interest_rate);
+    const termMonths = parseInt(req.body.term_months ?? loan.term_months, 10);
       const interestMethod = req.body.interest_method || loan.interest_method || 'declining_balance';
       const paymentFrequency = req.body.payment_frequency || loan.payment_frequency || 'monthly';
       const disbursementDate = loan.disbursement_date || loan.application_date || new Date().toISOString().split('T')[0];
@@ -1272,21 +1273,47 @@ router.put('/:id', authenticate, [
         });
       }
 
-      await loan.update({
-        ...req.body,
-        monthly_payment: scheduleData.monthly_payment,
-        total_interest: scheduleData.total_interest,
-        total_amount: scheduleData.total_amount,
-        repayment_schedule: JSON.stringify(scheduleData.schedule)
-      });
-    } else {
-      await loan.update(req.body);
-    }
+    const loanTypeConfig = getLoanTypeConfig(req.body.loan_type || loan.loan_type);
+    const defaultChargesPct = loanTypeConfig.hasDefaultCharges
+      ? (parseFloat(req.body.default_charges_percentage ?? loan.default_charges_percentage) || 0)
+      : 0;
+    const defaultChargesAmount = principal * (defaultChargesPct / 100);
+    const totalAmount = (scheduleData.total_amount || 0) + defaultChargesAmount;
+    const outstandingBalance = totalAmount;
+
+    const updatePayload = {
+      amount: principal,
+      principal_amount: principal,
+      interest_rate: interestRate,
+      term_months: termMonths,
+      interest_method: interestMethod,
+      payment_frequency: paymentFrequency,
+      monthly_payment: scheduleData.monthly_payment || 0,
+      total_interest: scheduleData.total_interest || 0,
+      total_amount: totalAmount,
+      outstanding_balance: outstandingBalance,
+      repayment_schedule: JSON.stringify(scheduleData.schedule || []),
+      default_charges_percentage: defaultChargesPct,
+      default_charges_amount: defaultChargesAmount
+    };
+    if (req.body.notes !== undefined) updatePayload.notes = req.body.notes == null ? null : String(req.body.notes).trim();
+    if (req.body.loan_purpose !== undefined) updatePayload.loan_purpose = req.body.loan_purpose == null ? null : String(req.body.loan_purpose).trim();
+    if (req.body.loan_type !== undefined) updatePayload.loan_type = req.body.loan_type;
+    if (req.body.currency !== undefined) updatePayload.currency = req.body.currency || 'USD';
+    if (req.body.disbursement_date !== undefined) updatePayload.disbursement_date = req.body.disbursement_date || null;
+    if (req.body.branch_id !== undefined) updatePayload.branch_id = req.body.branch_id === '' || req.body.branch_id === null ? null : parseInt(req.body.branch_id, 10);
+    if (req.body.collateral_id !== undefined) updatePayload.collateral_id = req.body.collateral_id === '' || req.body.collateral_id === null ? null : parseInt(req.body.collateral_id, 10);
+
+    await loan.update(updatePayload);
+
+    const updatedLoan = await db.Loan.findByPk(loan.id, {
+      include: [{ model: db.Client, as: 'client', required: false }]
+    });
 
     res.json({
       success: true,
       message: 'Loan updated successfully',
-      data: { loan }
+      data: { loan: updatedLoan }
     });
   } catch (error) {
     console.error('Update loan error:', error);

@@ -1,11 +1,13 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
 router.use(authenticate);
+
+const APPROVER_ROLES = ['admin', 'head_micro_loan', 'supervisor'];
 
 // Get all savings accounts
 router.get('/', async (req, res) => {
@@ -200,6 +202,7 @@ router.post('/', [
       });
     }
 
+    const isMicroLoanOfficer = req.user?.role === 'micro_loan_officer';
     const savingsAccount = await db.SavingsAccount.create({
       client_id: parseInt(req.body.client_id),
       account_type: accountType,
@@ -207,10 +210,10 @@ router.post('/', [
       balance: initialDeposit,
       interest_rate: interestRate,
       branch_id: branchId,
-      status: 'active',
+      status: isMicroLoanOfficer ? 'pending' : 'active',
       created_by: req.userId,
       opening_date: req.body.opening_date || new Date(),
-      currency: currency // Currency for the savings account (LRD or USD)
+      currency: currency
     });
 
     // If there's an initial deposit, create a transaction for it
@@ -341,6 +344,7 @@ router.post('/:id/deposit', [
       });
     }
 
+    const isMicroLoanOfficer = req.user?.role === 'micro_loan_officer';
     const depositAmount = parseFloat(req.body.amount);
     if (isNaN(depositAmount) || depositAmount <= 0) {
       return res.status(400).json({
@@ -385,17 +389,18 @@ router.post('/:id/deposit', [
       savings_account_id: savingsAccount.id,
       type: 'deposit',
       amount: depositAmount,
-      currency: savingsAccount.currency || 'USD', // Include currency from savings account
+      currency: savingsAccount.currency || 'USD',
       description: req.body.description || `Deposit to ${savingsAccount.account_number}`,
-      purpose: req.body.purpose || null, // Include purpose field
+      purpose: req.body.purpose || null,
       transaction_date: new Date(),
-      status: 'completed',
+      status: isMicroLoanOfficer ? 'pending' : 'completed',
       branch_id: savingsAccount.branch_id,
       created_by: req.userId
     });
 
-    // Update savings account balance
-    await savingsAccount.update({ balance: newBalance });
+    if (!isMicroLoanOfficer) {
+      await savingsAccount.update({ balance: newBalance });
+    }
 
     // Create notification
     await db.Notification.create({
@@ -409,19 +414,22 @@ router.post('/:id/deposit', [
 
     res.json({
       success: true,
-      message: 'Deposit processed successfully',
+      message: isMicroLoanOfficer
+        ? 'Deposit recorded and is pending approval'
+        : 'Deposit processed successfully',
       data: {
         transaction,
         savings_account: {
           account_number: savingsAccount.account_number,
-          balance: newBalance
+          balance: isMicroLoanOfficer ? parseFloat(savingsAccount.balance || 0) : newBalance
         },
+        pending_approval: isMicroLoanOfficer,
         receipt: {
           transaction_number: transactionNumber,
           account_number: savingsAccount.account_number,
           client_name: `${savingsAccount.client?.first_name} ${savingsAccount.client?.last_name}`,
           amount: depositAmount,
-          balance: newBalance,
+          balance: isMicroLoanOfficer ? parseFloat(savingsAccount.balance || 0) : newBalance,
           date: transaction.transaction_date,
           type: 'deposit',
           description: transaction.description
@@ -468,6 +476,7 @@ router.post('/:id/withdraw', [
       });
     }
 
+    const isMicroLoanOfficer = req.user?.role === 'micro_loan_officer';
     const withdrawalAmount = parseFloat(req.body.amount);
     if (isNaN(withdrawalAmount) || withdrawalAmount <= 0) {
       return res.status(400).json({
@@ -523,17 +532,18 @@ router.post('/:id/withdraw', [
       savings_account_id: savingsAccount.id,
       type: 'withdrawal',
       amount: withdrawalAmount,
-      currency: savingsAccount.currency || 'USD', // Include currency from savings account
+      currency: savingsAccount.currency || 'USD',
       description: req.body.description || `Withdrawal from ${savingsAccount.account_number}`,
-      purpose: req.body.purpose || null, // Include purpose field
+      purpose: req.body.purpose || null,
       transaction_date: new Date(),
-      status: 'completed',
+      status: isMicroLoanOfficer ? 'pending' : 'completed',
       branch_id: savingsAccount.branch_id,
       created_by: req.userId
     });
 
-    // Update savings account balance
-    await savingsAccount.update({ balance: newBalance });
+    if (!isMicroLoanOfficer) {
+      await savingsAccount.update({ balance: newBalance });
+    }
 
     // Create notification
     await db.Notification.create({
@@ -547,19 +557,22 @@ router.post('/:id/withdraw', [
 
     res.json({
       success: true,
-      message: 'Withdrawal processed successfully',
+      message: isMicroLoanOfficer
+        ? 'Withdrawal recorded and is pending approval'
+        : 'Withdrawal processed successfully',
       data: {
         transaction,
         savings_account: {
           account_number: savingsAccount.account_number,
-          balance: newBalance
+          balance: isMicroLoanOfficer ? parseFloat(savingsAccount.balance || 0) : newBalance
         },
+        pending_approval: isMicroLoanOfficer,
         receipt: {
           transaction_number: transactionNumber,
           account_number: savingsAccount.account_number,
           client_name: `${savingsAccount.client?.first_name} ${savingsAccount.client?.last_name}`,
           amount: withdrawalAmount,
-          balance: newBalance,
+          balance: isMicroLoanOfficer ? parseFloat(savingsAccount.balance || 0) : newBalance,
           date: transaction.transaction_date,
           type: 'withdrawal',
           description: transaction.description
@@ -572,6 +585,43 @@ router.post('/:id/withdraw', [
       success: false,
       message: 'Failed to process withdrawal',
       error: error.message
+    });
+  }
+});
+
+// Approve savings account (supervisor, head_micro_loan, or admin only)
+router.post('/:id/approve', authorize(...APPROVER_ROLES), async (req, res) => {
+  try {
+    const savingsAccount = await db.SavingsAccount.findByPk(req.params.id, {
+      include: [{ model: db.Client, as: 'client', required: false }]
+    });
+    if (!savingsAccount) {
+      return res.status(404).json({
+        success: false,
+        message: 'Savings account not found'
+      });
+    }
+    if (savingsAccount.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only pending savings accounts can be approved'
+      });
+    }
+    await savingsAccount.update({
+      status: 'active',
+      approved_by: req.userId
+    });
+    res.json({
+      success: true,
+      message: 'Savings account approved successfully',
+      data: { savingsAccount }
+    });
+  } catch (error) {
+    console.error('Approve savings error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to approve savings account',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
 });

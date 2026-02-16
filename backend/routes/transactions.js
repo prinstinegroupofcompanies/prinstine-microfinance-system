@@ -1,11 +1,13 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
 router.use(authenticate);
+
+const APPROVER_ROLES = ['admin', 'head_micro_loan', 'supervisor'];
 
 // Get all transactions
 router.get('/', async (req, res) => {
@@ -328,6 +330,68 @@ router.get('/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch transaction',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// Approve pending transaction (supervisor, head_micro_loan, or admin only)
+router.post('/:id/approve', authorize(...APPROVER_ROLES), async (req, res) => {
+  try {
+    const transaction = await db.Transaction.findByPk(req.params.id, {
+      include: [{ model: db.SavingsAccount, as: 'savingsAccount', required: false }]
+    });
+    if (!transaction) {
+      return res.status(404).json({
+        success: false,
+        message: 'Transaction not found'
+      });
+    }
+    if (transaction.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only pending transactions can be approved'
+      });
+    }
+    if (transaction.type !== 'deposit' && transaction.type !== 'withdrawal') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only deposit or withdrawal transactions can be approved'
+      });
+    }
+    const savingsAccount = transaction.savingsAccount;
+    if (!savingsAccount) {
+      return res.status(400).json({
+        success: false,
+        message: 'Transaction has no linked savings account'
+      });
+    }
+    const amount = parseFloat(transaction.amount || 0);
+    const currentBalance = parseFloat(savingsAccount.balance || 0);
+    const newBalance = transaction.type === 'deposit'
+      ? currentBalance + amount
+      : Math.max(0, currentBalance - amount);
+    if (transaction.type === 'withdrawal' && amount > currentBalance) {
+      return res.status(400).json({
+        success: false,
+        message: 'Insufficient balance to approve this withdrawal'
+      });
+    }
+    await savingsAccount.update({ balance: newBalance });
+    await transaction.update({ status: 'completed' });
+    res.json({
+      success: true,
+      message: 'Transaction approved successfully',
+      data: {
+        transaction,
+        savings_account: { account_number: savingsAccount.account_number, balance: newBalance }
+      }
+    });
+  } catch (error) {
+    console.error('Approve transaction error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to approve transaction',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }

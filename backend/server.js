@@ -267,6 +267,11 @@ db.sequelize.authenticate()
         { name: 'created_by', type: 'INTEGER' }
       ]);
 
+      await ensureTableColumns(db.sequelize, 'savings_accounts', [
+        { name: 'created_by', type: 'INTEGER' },
+        { name: 'approved_by', type: 'INTEGER' }
+      ]);
+
       await ensureTableColumns(db.sequelize, 'loan_repayments', [
         { name: 'loan_id', type: 'INTEGER' },
         { name: 'repayment_number', type: 'VARCHAR(255)' },

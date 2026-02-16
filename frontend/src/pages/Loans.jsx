@@ -778,11 +778,11 @@ const Loans = () => {
                                 <i className="fas fa-edit"></i>
                               </button>
                             )}
-                            {user?.role !== 'borrower' && loan.status === 'pending' && (
+                            {['admin', 'head_micro_loan', 'supervisor'].includes(user?.role) && loan.status === 'pending' && (
                               <button
                                 className="btn btn-sm btn-outline-success"
                                 onClick={() => handleApprove(loan.id)}
-                                title="Approve"
+                                title="Approve (Supervisor / Head of Micro Loan / Admin)"
                               >
                                 <i className="fas fa-check"></i>
                               </button>

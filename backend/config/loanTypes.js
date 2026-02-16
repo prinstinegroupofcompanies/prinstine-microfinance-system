@@ -7,9 +7,9 @@ const LOAN_TYPES = {
     interestMethod: 'declining_balance',
     hasDefaultCharges: false,
     interestDistribution: {
-      admin: 0.30, // 30% to admin revenue
-      client: 0.40, // 40% to client with loan
-      general: 0.30 // 30% divided among all clients with savings
+      admin: 0.20,   // 20% to company (revenue)
+      client: 0.50,   // 50% to loan owner
+      general: 0.30   // 30% shared with all users with savings
     }
   },
   excess: {
@@ -19,9 +19,9 @@ const LOAN_TYPES = {
     interestMethod: 'declining_balance',
     hasDefaultCharges: false,
     interestDistribution: {
-      admin: 0.20, // 20% to admin revenue
-      client: 0.30, // 30% to client with loan
-      general: 0.50 // 50% divided among all clients with savings
+      admin: 0.20,   // 20% to company (revenue)
+      client: 0.50,   // 50% to loan owner
+      general: 0.30   // 30% shared with all users with savings
     }
   },
   business: {
@@ -29,21 +29,36 @@ const LOAN_TYPES = {
     interestRate: 5, // 5% on loan
     upfrontPercentage: 10, // 10% upfront
     interestMethod: 'declining_balance',
-    hasDefaultCharges: false
+    hasDefaultCharges: false,
+    interestDistribution: {
+      admin: 0.20,   // 20% to company (revenue)
+      client: 0.50,   // 50% to loan owner
+      general: 0.30   // 30% shared with all users with savings
+    }
   },
   emergency: {
     name: 'Emergency Loan',
     interestRate: 16, // 16% on loan
     upfrontPercentage: 2, // 2% upfront
     interestMethod: 'declining_balance',
-    hasDefaultCharges: true
+    hasDefaultCharges: true,
+    interestDistribution: {
+      admin: 0.20,
+      client: 0.50,
+      general: 0.30
+    }
   },
   micro: {
     name: 'Micro Loan',
     interestRate: 12, // Default 12% on loan (can be customized)
     upfrontPercentage: 5, // Default 5% upfront (can be customized)
     interestMethod: 'declining_balance',
-    hasDefaultCharges: true
+    hasDefaultCharges: true,
+    interestDistribution: {
+      admin: 0.20,
+      client: 0.50,
+      general: 0.30
+    }
   }
 };
 

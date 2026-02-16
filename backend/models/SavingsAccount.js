@@ -57,6 +57,16 @@ module.exports = (sequelize) => {
       defaultValue: 'USD',
       allowNull: false,
       comment: 'Currency for the savings account (LRD or USD)'
+    },
+    created_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'users', key: 'id' }
+    },
+    approved_by: {
+      type: DataTypes.INTEGER,
+      allowNull: true,
+      references: { model: 'users', key: 'id' }
     }
   }, {
     tableName: 'savings_accounts',
