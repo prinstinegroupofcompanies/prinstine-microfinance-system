@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import apiClient from '../config/axios';
 import { toast } from 'react-toastify';
 import { useAuth } from '../contexts/AuthContext';
 import { getImageUrl } from '../utils/imageUtils';
+
+const FULL_RECORDS_ROLES = ['admin', 'loan_officer', 'head_micro_loan', 'supervisor', 'micro_loan_officer'];
+const REFRESH_INTERVAL_MS = 15000;
 
 const ClientDetail = () => {
   const { id } = useParams();
@@ -16,15 +19,45 @@ const ClientDetail = () => {
   const [branches, setBranches] = useState([]);
   const [loans, setLoans] = useState([]);
   const [savings, setSavings] = useState([]);
+  const [fullRecord, setFullRecord] = useState(null);
 
-  useEffect(() => {
-    fetchClient();
-    fetchBranches();
-    fetchClientLoans();
-    fetchClientSavings();
-  }, [id]);
+  const canViewFullRecords = FULL_RECORDS_ROLES.includes(user?.role);
 
-  const fetchClient = async () => {
+  const fetchFullRecord = useCallback(async () => {
+    if (!canViewFullRecords || !id) return;
+    try {
+      const response = await apiClient.get(`/api/clients/${id}/full`);
+      const data = response.data?.data;
+      if (data) {
+        setClient(data.client ?? null);
+        setFormData(data.client ?? {});
+        setLoans(data.loans ?? []);
+        setSavings(data.savingsAccounts ?? []);
+        setFullRecord(data);
+      }
+    } catch (err) {
+      setFullRecord(null);
+      if (err.response?.status === 403) return;
+      console.error('Failed to fetch full client record:', err);
+      // Fallback: load basic client data so page still shows something
+      try {
+        const [cRes, lRes, sRes] = await Promise.all([
+          apiClient.get(`/api/clients/${id}`),
+          apiClient.get(`/api/clients/${id}/loans`),
+          apiClient.get(`/api/clients/${id}/savings`)
+        ]);
+        const c = cRes.data?.data?.client;
+        if (c) {
+          setClient(c);
+          setFormData(c);
+        }
+        setLoans(lRes.data?.data?.loans ?? []);
+        setSavings(sRes.data?.data?.savingsAccounts ?? []);
+      } catch (_) {}
+    }
+  }, [id, canViewFullRecords]);
+
+  const fetchClient = useCallback(async () => {
     try {
       const response = await apiClient.get(`/api/clients/${id}`);
       const clientData = response.data?.data?.client;
@@ -36,7 +69,7 @@ const ClientDetail = () => {
       toast.error('Failed to load client details');
       setLoading(false);
     }
-  };
+  }, [id]);
 
   const fetchBranches = async () => {
     try {
@@ -47,23 +80,39 @@ const ClientDetail = () => {
     }
   };
 
-  const fetchClientLoans = async () => {
+  const fetchClientLoans = useCallback(async () => {
     try {
       const response = await apiClient.get(`/api/clients/${id}/loans`);
-      setLoans(response.data.data.loans || []);
+      setLoans(response.data?.data?.loans || []);
     } catch (error) {
       console.error('Failed to fetch client loans:', error);
     }
-  };
+  }, [id]);
 
-  const fetchClientSavings = async () => {
+  const fetchClientSavings = useCallback(async () => {
     try {
       const response = await apiClient.get(`/api/clients/${id}/savings`);
       setSavings(response.data?.data?.savingsAccounts ?? []);
     } catch (error) {
       console.error('Failed to fetch client savings:', error);
     }
-  };
+  }, [id]);
+
+  useEffect(() => {
+    setLoading(true);
+    if (canViewFullRecords) {
+      fetchFullRecord().finally(() => setLoading(false));
+    } else {
+      Promise.all([fetchClient(), fetchClientLoans(), fetchClientSavings()]).finally(() => setLoading(false));
+    }
+    fetchBranches();
+  }, [id, canViewFullRecords]);
+
+  useEffect(() => {
+    if (!canViewFullRecords || !id) return;
+    const interval = setInterval(fetchFullRecord, REFRESH_INTERVAL_MS);
+    return () => clearInterval(interval);
+  }, [id, canViewFullRecords, fetchFullRecord]);
 
   const handleUpdate = async (e) => {
     e.preventDefault();
@@ -71,7 +120,8 @@ const ClientDetail = () => {
       await apiClient.put(`/api/clients/${id}`, formData);
       toast.success('Client updated successfully!');
       setShowEditModal(false);
-      fetchClient();
+      if (canViewFullRecords) fetchFullRecord();
+      else fetchClient();
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to update client');
     }
@@ -110,6 +160,12 @@ const ClientDetail = () => {
   }
 
   const isAdmin = user?.role === 'admin';
+  const summary = fullRecord?.summary || null;
+  const formatCur = (amount, curr) => {
+    const c = curr || 'USD';
+    const n = parseFloat(amount || 0);
+    return c === 'LRD' ? `LRD ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   return (
     <div className="fade-in">
@@ -121,7 +177,12 @@ const ClientDetail = () => {
           <h1 className="h3 mb-1">{client.first_name} {client.last_name}</h1>
           <p className="text-muted">Client Number: {client.client_number}</p>
         </div>
-        <div>
+        <div className="d-flex align-items-center gap-2">
+          {fullRecord && (
+            <span className="badge bg-success opacity-90" title="Refreshing every 15 seconds">
+              <i className="fas fa-sync-alt me-1"></i> Live
+            </span>
+          )}
           <button
             className="btn btn-primary me-2"
             onClick={() => setShowEditModal(true)}
@@ -423,10 +484,10 @@ const ClientDetail = () => {
                         <tr key={account.id}>
                           <td><strong>{account.account_number}</strong></td>
                           <td>{account.account_type}</td>
-                          <td>${parseFloat(account.balance || 0).toLocaleString()}</td>
+                          <td>{formatCur(account.balance, account.currency)}</td>
                           <td>{account.interest_rate || 0}%</td>
                           <td>
-                            <span className={`badge bg-${account.status === 'active' ? 'success' : 'secondary'}`}>
+                            <span className={`badge bg-${account.status === 'active' ? 'success' : account.status === 'pending' ? 'warning' : 'secondary'}`}>
                               {account.status}
                             </span>
                           </td>
@@ -446,6 +507,290 @@ const ClientDetail = () => {
             </div>
           </div>
         </div>
+
+        {/* Full records: Take Home & details (admin, loan officer, head micro loan, supervisor) */}
+        {fullRecord && (
+          <>
+            {/* Take Home Summary */}
+            {summary && (
+              <div className="col-12 mb-4">
+                <div className="card border-primary">
+                  <div className="card-header bg-primary text-white">
+                    <h5 className="mb-0"><i className="fas fa-wallet me-2"></i>Client Summary & Total Take Home</h5>
+                  </div>
+                  <div className="card-body">
+                    <div className="row g-3">
+                      <div className="col-md-3">
+                        <div className="p-3 bg-light rounded">
+                          <small className="text-muted d-block">Total Savings Balance</small>
+                          <strong className="text-success">{formatCur(summary.totalSavingsBalance, summary.currency)}</strong>
+                        </div>
+                      </div>
+                      <div className="col-md-3">
+                        <div className="p-3 bg-light rounded">
+                          <small className="text-muted d-block">Total Interest Received</small>
+                          <strong className="text-info">{formatCur(summary.totalInterestReceived, summary.currency)}</strong>
+                        </div>
+                      </div>
+                      <div className="col-md-3">
+                        <div className="p-3 bg-light rounded">
+                          <small className="text-muted d-block">Dues Outstanding</small>
+                          <strong className="text-warning">{formatCur(summary.totalDuesOutstanding, summary.currency)}</strong>
+                        </div>
+                      </div>
+                      <div className="col-md-3">
+                        <div className="p-3 bg-light rounded">
+                          <small className="text-muted d-block">Total Penalties</small>
+                          <strong className="text-danger">{formatCur(summary.totalPenalties, summary.currency)}</strong>
+                        </div>
+                      </div>
+                      <div className="col-12">
+                        <div className="p-3 bg-primary bg-opacity-10 rounded border border-primary">
+                          <small className="text-muted d-block">Total Take Home</small>
+                          <h4 className="mb-0 text-primary">{formatCur(summary.takeHome, summary.currency)}</h4>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Savings Records (transactions per account) */}
+            {fullRecord.savingsRecords && fullRecord.savingsRecords.length > 0 && (
+              <div className="col-12 mb-4">
+                <div className="card">
+                  <div className="card-header bg-success text-white">
+                    <h5 className="mb-0"><i className="fas fa-list me-2"></i>Savings Records (Recent Transactions)</h5>
+                  </div>
+                  <div className="card-body">
+                    <div className="table-responsive">
+                      <table className="table table-hover table-sm">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Account</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                            <th>Description</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fullRecord.savingsRecords.slice(0, 100).map((r, idx) => (
+                            <tr key={r.id || idx}>
+                              <td>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString() : '-'}</td>
+                              <td>{r.account_number || '-'}</td>
+                              <td><span className="badge bg-secondary">{r.type || '-'}</span></td>
+                              <td>{formatCur(r.amount, r.currency)}</td>
+                              <td>{r.description || r.purpose || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* All Transactions */}
+            {fullRecord.transactions && fullRecord.transactions.length > 0 && (
+              <div className="col-12 mb-4">
+                <div className="card">
+                  <div className="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                    <h5 className="mb-0"><i className="fas fa-exchange-alt me-2"></i>Transaction Records</h5>
+                    <Link to={`/transactions?client_id=${id}`} className="btn btn-sm btn-light">View All</Link>
+                  </div>
+                  <div className="card-body">
+                    <div className="table-responsive">
+                      <table className="table table-hover table-sm">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Number</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                            <th>Loan / Account</th>
+                            <th>Description</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fullRecord.transactions.slice(0, 100).map((t) => (
+                            <tr key={t.id}>
+                              <td>{t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '-'}</td>
+                              <td><strong>{t.transaction_number}</strong></td>
+                              <td><span className="badge bg-secondary">{t.type}</span></td>
+                              <td>{formatCur(t.amount, t.currency)}</td>
+                              <td>{t.loan?.loan_number || t.savingsAccount?.account_number || '-'}</td>
+                              <td>{t.description || t.purpose || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Loan Records (repayments) */}
+            {fullRecord.loanRecords && fullRecord.loanRecords.length > 0 && (
+              <div className="col-12 mb-4">
+                <div className="card">
+                  <div className="card-header bg-primary text-white">
+                    <h5 className="mb-0"><i className="fas fa-file-invoice-dollar me-2"></i>Loan Records (Repayments)</h5>
+                  </div>
+                  <div className="card-body">
+                    <div className="table-responsive">
+                      <table className="table table-hover table-sm">
+                        <thead>
+                          <tr>
+                            <th>Loan</th>
+                            <th>Installment</th>
+                            <th>Due Date</th>
+                            <th>Payment Date</th>
+                            <th>Principal</th>
+                            <th>Interest</th>
+                            <th>Penalty</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fullRecord.loanRecords.slice(0, 150).map((r, idx) => (
+                            <tr key={r.id || idx}>
+                              <td><strong>{r.loan_number}</strong></td>
+                              <td>{r.installment_number}</td>
+                              <td>{r.due_date ? new Date(r.due_date).toLocaleDateString() : '-'}</td>
+                              <td>{r.payment_date ? new Date(r.payment_date).toLocaleDateString() : '-'}</td>
+                              <td>{formatCur(r.principal_amount, r.currency)}</td>
+                              <td>{formatCur(r.interest_amount, r.currency)}</td>
+                              <td>{formatCur(r.penalty_amount, r.currency)}</td>
+                              <td><span className={`badge bg-${r.status === 'completed' ? 'success' : 'warning'}`}>{r.status || 'pending'}</span></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Interest Shared */}
+            {fullRecord.interestShared && fullRecord.interestShared.length > 0 && (
+              <div className="col-12 mb-4">
+                <div className="card">
+                  <div className="card-header bg-info text-white">
+                    <h5 className="mb-0"><i className="fas fa-percentage me-2"></i>Interest Shared on Client</h5>
+                  </div>
+                  <div className="card-body">
+                    <div className="table-responsive">
+                      <table className="table table-hover table-sm">
+                        <thead>
+                          <tr>
+                            <th>Date</th>
+                            <th>Transaction</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                            <th>Description</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fullRecord.interestShared.map((t) => (
+                            <tr key={t.id}>
+                              <td>{t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '-'}</td>
+                              <td><strong>{t.transaction_number}</strong></td>
+                              <td><span className="badge bg-info">{t.type}</span></td>
+                              <td>{formatCur(t.amount, t.currency)}</td>
+                              <td>{t.description || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Dues & Dues Records */}
+            {fullRecord.dues && (
+              <div className="col-12 mb-4">
+                <div className="card">
+                  <div className="card-header bg-warning text-dark">
+                    <h5 className="mb-0"><i className="fas fa-calendar-check me-2"></i>Dues & Dues Records</h5>
+                  </div>
+                  <div className="card-body">
+                    <div className="mb-3">
+                      <strong>Outstanding Dues:</strong>{' '}
+                      <span className="text-warning">{formatCur(fullRecord.dues.total_dues, fullRecord.dues.dues_currency)}</span>
+                      {fullRecord.dues.dues_currency && <small className="text-muted ms-1">({fullRecord.dues.dues_currency})</small>}
+                    </div>
+                    {fullRecord.dues.records && fullRecord.dues.records.length > 0 && (
+                      <div className="table-responsive">
+                        <table className="table table-hover table-sm">
+                          <thead>
+                            <tr>
+                              <th>Date</th>
+                              <th>Transaction</th>
+                              <th>Amount</th>
+                              <th>Description</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {fullRecord.dues.records.slice(0, 50).map((t) => (
+                              <tr key={t.id}>
+                                <td>{t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '-'}</td>
+                                <td><strong>{t.transaction_number}</strong></td>
+                                <td>{formatCur(t.amount, t.currency)}</td>
+                                <td>{t.description || t.purpose || '-'}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Penalty Records */}
+            {fullRecord.penaltyRecords && fullRecord.penaltyRecords.length > 0 && (
+              <div className="col-12 mb-4">
+                <div className="card">
+                  <div className="card-header bg-danger text-white">
+                    <h5 className="mb-0"><i className="fas fa-exclamation-triangle me-2"></i>Penalty Records</h5>
+                  </div>
+                  <div className="card-body">
+                    <div className="table-responsive">
+                      <table className="table table-hover table-sm">
+                        <thead>
+                          <tr>
+                            <th>Source</th>
+                            <th>Date</th>
+                            <th>Loan / Transaction</th>
+                            <th>Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {fullRecord.penaltyRecords.map((p, idx) => (
+                            <tr key={p.id || idx}>
+                              <td><span className="badge bg-secondary">{p.source || 'loan'}</span></td>
+                              <td>{p.transaction_date ? new Date(p.transaction_date).toLocaleDateString() : (p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '-')}</td>
+                              <td>{p.loan_number || p.transaction_number || '-'}</td>
+                              <td>{formatCur(p.amount ?? p.penalty_amount, p.currency)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
       {/* Edit Modal */}

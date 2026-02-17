@@ -142,6 +142,173 @@ router.get('/:id', authenticate, async (req, res) => {
   }
 });
 
+// Roles that can view full client records (savings, transactions, loans, interest, dues, penalties, take home)
+const FULL_CLIENT_RECORDS_ROLES = ['admin', 'loan_officer', 'head_micro_loan', 'supervisor', 'micro_loan_officer'];
+
+// Get full client record: savings + records, transactions, loans + records, interest shared, dues, penalties, take home
+router.get('/:id/full', authenticate, async (req, res) => {
+  try {
+    const userRole = req.user?.role || 'user';
+    if (!FULL_CLIENT_RECORDS_ROLES.includes(userRole)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied. Full client records are only available to admin, loan officer, head of micro loan, and supervisor.'
+      });
+    }
+
+    const clientId = parseInt(req.params.id, 10);
+    if (Number.isNaN(clientId)) {
+      return res.status(400).json({ success: false, message: 'Invalid client ID' });
+    }
+
+    const client = await db.Client.findByPk(clientId, {
+      include: [
+        { model: db.Branch, as: 'branch', required: false },
+        { model: db.User, as: 'creator', required: false }
+      ]
+    });
+    if (!client) {
+      return res.status(404).json({
+        success: false,
+        message: 'Client not found'
+      });
+    }
+
+    if (userRole === 'borrower' && client.user_id !== req.userId) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access denied.'
+      });
+    }
+
+    const [savingsAccounts, transactions, loans, duePaymentTxns] = await Promise.all([
+      db.SavingsAccount.findAll({
+        where: { client_id: clientId },
+        include: [
+          { model: db.Branch, as: 'branch', required: false },
+          { model: db.Transaction, as: 'transactions', required: false, separate: true, limit: 200, order: [['transaction_date', 'DESC']] }
+        ],
+        order: [['createdAt', 'DESC']]
+      }),
+      db.Transaction.findAll({
+        where: { client_id: clientId },
+        include: [
+          { model: db.Loan, as: 'loan', required: false, attributes: ['id', 'loan_number'] },
+          { model: db.SavingsAccount, as: 'savingsAccount', required: false, attributes: ['id', 'account_number'] }
+        ],
+        order: [['transaction_date', 'DESC']],
+        limit: 500
+      }),
+      db.Loan.findAll({
+        where: { client_id: clientId },
+        include: [
+          { model: db.Branch, as: 'branch', required: false, attributes: ['id', 'name', 'code'] },
+          { model: db.LoanRepayment, as: 'repayments', required: false, order: [['installment_number', 'ASC']] }
+        ],
+        order: [['createdAt', 'DESC']]
+      }),
+      db.Transaction.findAll({
+        where: { client_id: clientId, type: 'due_payment' },
+        order: [['transaction_date', 'DESC']],
+        limit: 200
+      })
+    ]);
+
+    const interestShared = transactions.filter(t =>
+      t.type === 'personal_interest_payment' || t.type === 'general_interest'
+    );
+    const penaltyTransactions = transactions.filter(t => t.type === 'penalty');
+    const loanRepaymentsWithPenalty = [];
+    for (const loan of loans) {
+      if (loan.repayments) {
+        for (const r of loan.repayments) {
+          const penalty = parseFloat(r.penalty_amount || 0);
+          if (penalty > 0) {
+            loanRepaymentsWithPenalty.push({
+              loan_id: loan.id,
+              loan_number: loan.loan_number,
+              repayment_number: r.repayment_number,
+              penalty_amount: penalty,
+              payment_date: r.payment_date,
+              currency: loan.currency || 'USD'
+            });
+          }
+        }
+      }
+    }
+
+    const totalSavingsBalance = savingsAccounts.reduce((sum, s) => sum + parseFloat(s.balance || 0), 0);
+    const totalInterestReceived = interestShared.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0);
+    const totalDuesOutstanding = Math.abs(Math.min(0, parseFloat(client.total_dues || 0)));
+    const totalPenalties = penaltyTransactions.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0) +
+      loanRepaymentsWithPenalty.reduce((sum, p) => sum + (p.penalty_amount || 0), 0);
+    const takeHome = totalSavingsBalance + totalInterestReceived - totalDuesOutstanding - totalPenalties;
+
+    const loansWithSchedules = loans.map(loan => {
+      const loanData = loan.toJSON();
+      if (loanData.repayment_schedule && typeof loanData.repayment_schedule === 'string') {
+        try {
+          loanData.repayment_schedule = JSON.parse(loanData.repayment_schedule);
+        } catch (e) {
+          loanData.repayment_schedule = [];
+        }
+      }
+      if (!loanData.repayment_schedule && loanData.repayments?.length) {
+        loanData.repayment_schedule = loanData.repayments.map(r => ({
+          installment_number: r.installment_number,
+          due_date: r.due_date,
+          principal_payment: parseFloat(r.principal_amount || 0),
+          interest_payment: parseFloat(r.interest_amount || 0),
+          total_payment: parseFloat(r.amount || 0),
+          status: r.status,
+          payment_date: r.payment_date
+        }));
+      }
+      return loanData;
+    });
+
+    res.json({
+      success: true,
+      data: {
+        client: client.toJSON(),
+        savingsAccounts: savingsAccounts.map(s => s.toJSON()),
+        savingsRecords: savingsAccounts.flatMap(s => (s.transactions || []).map(t => {
+          const tx = typeof t.toJSON === 'function' ? t.toJSON() : t;
+          return { ...tx, account_number: s.account_number };
+        })),
+        transactions: transactions.map(t => t.toJSON()),
+        loans: loansWithSchedules,
+        loanRecords: loansWithSchedules.flatMap(l => (l.repayments || []).map(r => ({ ...r, loan_number: l.loan_number, currency: l.currency || 'USD' }))),
+        interestShared: interestShared.map(t => t.toJSON()),
+        dues: {
+          total_dues: parseFloat(client.total_dues || 0),
+          dues_currency: client.dues_currency || 'USD',
+          records: duePaymentTxns.map(t => t.toJSON())
+        },
+        penaltyRecords: [
+          ...penaltyTransactions.map(t => ({ source: 'transaction', ...t.toJSON() })),
+          ...loanRepaymentsWithPenalty
+        ],
+        summary: {
+          totalSavingsBalance,
+          totalInterestReceived,
+          totalDuesOutstanding,
+          totalPenalties,
+          takeHome,
+          currency: client.dues_currency || 'USD'
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Get full client record error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch full client record',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
 // Create client
 router.post('/', authenticate, upload.single('profile_image'), async (req, res) => {
   try {
