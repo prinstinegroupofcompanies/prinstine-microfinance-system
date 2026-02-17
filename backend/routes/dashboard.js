@@ -2,6 +2,7 @@ const express = require('express');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { Op } = require('sequelize');
+const { getBorrowerClient } = require('../helpers/borrower');
 
 const router = express.Router();
 
@@ -12,14 +13,13 @@ router.get('/', authenticate, async (req, res) => {
     const userRole = req.user?.role || 'user';
     const branchId = req.user?.branch_id || null;
 
-    // For borrower role, get their client_id and filter by it
+    // For borrower role, get their client_id (by user_id or by email fallback)
     let clientId = null;
     if (userRole === 'borrower') {
-      const client = await db.Client.findOne({ where: { user_id: userId } });
+      const client = await getBorrowerClient(userId, req.user?.email);
       if (client) {
         clientId = client.id;
       } else {
-        // If borrower doesn't have a client record, return empty data
         return res.json({
           success: true,
           data: {
@@ -30,7 +30,9 @@ router.get('/', authenticate, async (req, res) => {
               overdueLoans: 0,
               totalTransactions: 0,
               portfolioValue: 0,
-              totalCollections: 0
+              totalCollections: 0,
+              lrd: { totalSavings: 0, outstandingLoans: 0, outstandingDues: 0, personalInterest: 0, generalInterest: 0, totalFines: 0 },
+              usd: { totalSavings: 0, outstandingLoans: 0, outstandingDues: 0, personalInterest: 0, generalInterest: 0, totalFines: 0 }
             },
             recentLoans: [],
             recentTransactions: []

@@ -7,6 +7,7 @@ const upload = require('../middleware/upload');
 const path = require('path');
 const fs = require('fs');
 const { Op } = require('sequelize');
+const { getBorrowerClient } = require('../helpers/borrower');
 
 const router = express.Router();
 
@@ -25,9 +26,14 @@ router.get('/', authenticate, async (req, res) => {
     // Build base conditions
     const baseConditions = {};
     
-    // For borrower role, only show their own client
+    // For borrower role, only show their own client (by user_id or email fallback)
     if (userRole === 'borrower') {
-      baseConditions.user_id = req.userId;
+      const borrowerClient = await getBorrowerClient(req.userId, req.user?.email);
+      if (borrowerClient) {
+        baseConditions.id = borrowerClient.id;
+      } else {
+        baseConditions.id = -1; // no matching client
+      }
     } else if (branchId && userRole !== 'admin' && userRole !== 'general_manager') {
       baseConditions.branch_id = branchId;
     }
@@ -120,12 +126,15 @@ router.get('/:id', authenticate, async (req, res) => {
       });
     }
 
-    // For borrower role, ensure they can only access their own client
-    if (userRole === 'borrower' && client.user_id !== req.userId) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied. You can only view your own client profile.'
-      });
+    // For borrower role, ensure they can only access their own client (by user_id or email-linked client)
+    if (userRole === 'borrower') {
+      const borrowerClient = await getBorrowerClient(req.userId, req.user?.email);
+      if (!borrowerClient || borrowerClient.id !== client.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied. You can only view your own client profile.'
+        });
+      }
     }
 
     res.json({
@@ -174,11 +183,14 @@ router.get('/:id/full', authenticate, async (req, res) => {
       });
     }
 
-    if (userRole === 'borrower' && client.user_id !== req.userId) {
-      return res.status(403).json({
-        success: false,
-        message: 'Access denied.'
-      });
+    if (userRole === 'borrower') {
+      const borrowerClient = await getBorrowerClient(req.userId, req.user?.email);
+      if (!borrowerClient || borrowerClient.id !== client.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied.'
+        });
+      }
     }
 
     const [savingsAccounts, transactions, loans, duePaymentTxns] = await Promise.all([

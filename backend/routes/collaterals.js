@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const path = require('path');
 const fs = require('fs');
+const { getBorrowerClient } = require('../helpers/borrower');
 
 const router = express.Router();
 
@@ -15,11 +16,11 @@ router.get('/', async (req, res) => {
   try {
     const userRole = req.user?.role || 'user';
     
-    // For borrower role, get their client_id and filter by it
+    // For borrower role, get their client_id (by user_id or email fallback)
     let clientId = null;
     let whereClause = {};
     if (userRole === 'borrower') {
-      const client = await db.Client.findOne({ where: { user_id: req.userId } });
+      const client = await getBorrowerClient(req.userId, req.user?.email);
       if (client) {
         clientId = client.id;
         whereClause.client_id = clientId;

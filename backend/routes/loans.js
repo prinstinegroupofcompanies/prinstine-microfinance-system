@@ -3,6 +3,7 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { Op } = require('sequelize');
+const { getBorrowerClient } = require('../helpers/borrower');
 
 const router = express.Router();
 const { LOAN_TYPES, getLoanTypeConfig } = require('../config/loanTypes');
@@ -180,9 +181,9 @@ router.post('/', authenticate, [
     const userRole = req.user?.role || 'user';
     let clientId = req.body.client_id ? parseInt(req.body.client_id) : null;
 
-    // For borrower role, get their client_id automatically
+    // For borrower role, get their client_id automatically (by user_id or email fallback)
     if (userRole === 'borrower') {
-      const client = await db.Client.findOne({ where: { user_id: req.userId } });
+      const client = await getBorrowerClient(req.userId, req.user?.email);
       if (!client) {
         return res.status(400).json({
           success: false,

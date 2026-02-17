@@ -2,6 +2,7 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
+const { getBorrowerClient } = require('../helpers/borrower');
 
 const router = express.Router();
 
@@ -14,11 +15,11 @@ router.get('/', async (req, res) => {
   try {
     const userRole = req.user?.role || 'user';
     
-    // For borrower role, get their client_id and filter by it
+    // For borrower role, get their client_id (by user_id or email fallback)
     let clientId = null;
     let whereClause = {};
     if (userRole === 'borrower') {
-      const client = await db.Client.findOne({ where: { user_id: req.userId } });
+      const client = await getBorrowerClient(req.userId, req.user?.email);
       if (client) {
         clientId = client.id;
         whereClause.client_id = clientId;
@@ -64,6 +65,17 @@ router.get('/:id', async (req, res) => {
         success: false,
         message: 'Savings account not found'
       });
+    }
+
+    // Borrower can only view their own accounts
+    if (req.user?.role === 'borrower') {
+      const client = await getBorrowerClient(req.userId, req.user?.email);
+      if (!client || client.id !== savingsAccount.client_id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
     }
 
     // Get transactions for this account
@@ -402,15 +414,21 @@ router.post('/:id/deposit', [
       await savingsAccount.update({ balance: newBalance });
     }
 
-    // Create notification
-    await db.Notification.create({
-      user_id: savingsAccount.client?.user_id,
-      title: 'Deposit Received',
-      message: `Your deposit of $${depositAmount.toFixed(2)} has been credited to account ${savingsAccount.account_number}.`,
-      type: 'savings_deposit',
-      related_id: savingsAccount.id,
-      is_read: false
-    });
+    // Create notification only if client is linked to a user (user_id required by Notification model; type must be info|success|warning|error)
+    const notifyUserId = savingsAccount.client?.user_id;
+    if (notifyUserId) {
+      try {
+        await db.Notification.create({
+          user_id: notifyUserId,
+          title: 'Deposit Received',
+          message: `Your deposit of $${depositAmount.toFixed(2)} has been credited to account ${savingsAccount.account_number}.`,
+          type: 'success',
+          is_read: false
+        });
+      } catch (notifyErr) {
+        console.error('Notification create failed:', notifyErr);
+      }
+    }
 
     res.json({
       success: true,
@@ -474,6 +492,17 @@ router.post('/:id/withdraw', [
         success: false,
         message: 'Account is not active'
       });
+    }
+
+    // Borrower can only withdraw from their own account
+    if (req.user?.role === 'borrower') {
+      const client = await getBorrowerClient(req.userId, req.user?.email);
+      if (!client || client.id !== savingsAccount.client_id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
     }
 
     const isMicroLoanOfficer = req.user?.role === 'micro_loan_officer';
@@ -545,15 +574,21 @@ router.post('/:id/withdraw', [
       await savingsAccount.update({ balance: newBalance });
     }
 
-    // Create notification
-    await db.Notification.create({
-      user_id: savingsAccount.client?.user_id,
-      title: 'Withdrawal Processed',
-      message: `Withdrawal of $${withdrawalAmount.toFixed(2)} has been processed from account ${savingsAccount.account_number}.`,
-      type: 'savings_withdrawal',
-      related_id: savingsAccount.id,
-      is_read: false
-    });
+    // Create notification only if client is linked to a user
+    const notifyUserId = savingsAccount.client?.user_id;
+    if (notifyUserId) {
+      try {
+        await db.Notification.create({
+          user_id: notifyUserId,
+          title: 'Withdrawal Processed',
+          message: `Withdrawal of $${withdrawalAmount.toFixed(2)} has been processed from account ${savingsAccount.account_number}.`,
+          type: 'success',
+          is_read: false
+        });
+      } catch (notifyErr) {
+        console.error('Notification create failed:', notifyErr);
+      }
+    }
 
     res.json({
       success: true,

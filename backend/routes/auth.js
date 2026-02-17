@@ -51,6 +51,31 @@ router.post('/register', [
       email_verified_at: new Date()
     });
 
+    // If borrower, create a client record linked to this user so dashboard and records work
+    const effectiveRole = role || 'borrower';
+    if (effectiveRole === 'borrower') {
+      try {
+        const clientCount = await db.Client.count();
+        const clientNumber = `CL${String(clientCount + 1).padStart(6, '0')}`;
+        const nameParts = (name || '').trim().split(/\s+/);
+        const firstName = nameParts[0] || name;
+        const lastName = nameParts.slice(1).join(' ') || 'Client';
+        await db.Client.create({
+          client_number: clientNumber,
+          first_name: firstName,
+          last_name: lastName,
+          email: email,
+          phone: null,
+          status: 'active',
+          kyc_status: 'pending',
+          branch_id: branch_id || null,
+          user_id: user.id
+        });
+      } catch (clientErr) {
+        console.error('Error creating client for borrower on register:', clientErr);
+      }
+    }
+
     // Generate token
     const token = jwt.sign(
       { id: user.id, email: user.email, role: user.role },
