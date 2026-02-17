@@ -369,6 +369,90 @@ const Dashboard = () => {
                 </div>
               </div>
             </div>
+
+            {/* My Loans – loan details and repayment progress for borrower */}
+            <div className="col-12 mb-4">
+              <div className="card">
+                <div className="card-header d-flex justify-content-between align-items-center">
+                  <h5 className="mb-0">
+                    <i className="fas fa-hand-holding-usd me-2"></i>My Loans
+                  </h5>
+                  <Link to="/loans" className="btn btn-sm btn-outline-primary">View all / Make payment</Link>
+                </div>
+                <div className="card-body p-0">
+                  {recentLoans && recentLoans.length > 0 ? (
+                    <div className="table-responsive">
+                      <table className="table table-hover mb-0">
+                        <thead>
+                          <tr>
+                            <th>Loan Number</th>
+                            <th>Amount</th>
+                            <th>Outstanding</th>
+                            <th>Paid</th>
+                            <th>Status</th>
+                            <th>Progress</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {recentLoans.map((loan) => {
+                            const amount = parseFloat(loan.amount || 0);
+                            const outstanding = parseFloat(loan.outstanding_balance ?? loan.amount ?? 0);
+                            const totalPaid = parseFloat(loan.total_paid || 0);
+                            const progress = amount > 0 ? Math.min(100, (totalPaid / amount) * 100) : 0;
+                            const isComplete = loan.status === 'completed' || outstanding <= 0;
+                            const sym = loan.currency === 'LRD' ? 'LRD ' : '$';
+                            const fmt = (n) => (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                            return (
+                              <tr key={loan.id}>
+                                <td className="fw-medium">{loan.loan_number}</td>
+                                <td>{sym}{fmt(amount)}</td>
+                                <td className={isComplete ? 'text-success' : 'text-danger'}>{sym}{fmt(outstanding)}</td>
+                                <td className="text-success">{sym}{fmt(totalPaid)}</td>
+                                <td>
+                                  <span className={`badge bg-${
+                                    loan.status === 'completed' ? 'secondary' :
+                                    loan.status === 'active' || loan.status === 'disbursed' ? 'success' :
+                                    loan.status === 'pending' ? 'warning' :
+                                    loan.status === 'overdue' ? 'danger' : 'secondary'
+                                  }`}>
+                                    {loan.status}
+                                  </span>
+                                </td>
+                                <td style={{ minWidth: 120 }}>
+                                  <div className="progress" style={{ height: 8 }}>
+                                    <div
+                                      className={`progress-bar ${isComplete ? 'bg-success' : 'bg-primary'}`}
+                                      role="progressbar"
+                                      style={{ width: `${progress}%` }}
+                                      aria-valuenow={progress}
+                                      aria-valuemin="0"
+                                      aria-valuemax="100"
+                                    />
+                                  </div>
+                                  <small className="text-muted">{progress.toFixed(0)}% paid</small>
+                                </td>
+                                <td>
+                                  {!isComplete && (
+                                    <Link to={`/loans/${loan.id}`} className="btn btn-sm btn-outline-primary">Pay</Link>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="text-center text-muted py-5">
+                      <i className="fas fa-file-invoice-dollar fa-3x mb-3"></i>
+                      <p className="mb-0">You have no loans yet. Apply for a loan from the Loans page.</p>
+                      <Link to="/loans" className="btn btn-primary mt-3">Go to Loans</Link>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </>
         ) : (
           <>

@@ -127,7 +127,7 @@ router.get('/', authenticate, async (req, res) => {
               { model: db.Branch, as: 'branch', required: false, attributes: ['id', 'name'] }
             ],
             order: [['createdAt', 'DESC']],
-            limit: 5
+            limit: userRole === 'borrower' ? 20 : 5
           }).catch(() => []),
           db.Transaction.findAll({
             where: transactionsWhere,
