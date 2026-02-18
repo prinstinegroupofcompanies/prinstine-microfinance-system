@@ -344,15 +344,19 @@ router.delete('/:id', authorize('admin'), async (req, res) => {
       });
     }
 
-    // Check if user has associated client and handle accordingly
+    // Find associated client (include soft-deleted to ensure clean bidirectional delete)
     const associatedClient = await db.Client.findOne({ 
       where: { user_id: user.id },
-      transaction
+      transaction,
+      paranoid: false
     });
     
     if (associatedClient) {
       await deleteClientFinancialRecords(associatedClient.id, transaction);
-      await associatedClient.destroy({ transaction });
+      // Soft delete client if not already deleted
+      if (!associatedClient.deletedAt) {
+        await associatedClient.destroy({ transaction });
+      }
     }
     
     // Soft delete user (with paranoid mode)

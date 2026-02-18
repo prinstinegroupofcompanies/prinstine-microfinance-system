@@ -961,16 +961,19 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
     // Delete all financial records associated with the client
     await deleteClientFinancialRecords(client.id, transaction);
 
-    // Soft delete associated user account if present
-    if (client.user_id) {
-      const clientUser = await db.User.findByPk(client.user_id, { transaction });
-      if (clientUser) {
+    // Store user_id before destroying client (client may be needed for lookup)
+    const linkedUserId = client.user_id;
+
+    // Soft delete the client first (removes dependent before referenced)
+    await client.destroy({ transaction });
+
+    // Soft delete associated user account if present (user linked to this client)
+    if (linkedUserId) {
+      const clientUser = await db.User.findByPk(linkedUserId, { transaction, paranoid: false });
+      if (clientUser && !clientUser.deletedAt) {
         await clientUser.destroy({ transaction });
       }
     }
-
-    // Finally, delete the client
-    await client.destroy({ transaction }); // Soft delete with paranoid
 
     await transaction.commit();
 
