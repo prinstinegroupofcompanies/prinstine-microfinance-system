@@ -119,7 +119,8 @@ const RecycleBin = () => {
       toast.success(`${itemNames[type]} permanently deleted`);
       fetchDeletedItems();
     } catch (error) {
-      toast.error(error.response?.data?.message || `Failed to permanently delete ${type}`);
+      const msg = error.response?.data?.message || error.response?.data?.error || error.message || `Failed to permanently delete ${type}`;
+      toast.error(msg);
     }
   };
 

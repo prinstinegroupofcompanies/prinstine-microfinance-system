@@ -38,7 +38,7 @@ const Layout = ({ children }) => {
   const filteredMenuItems = getMenuItemsForRole(user?.role);
 
   return (
-    <div className="d-flex layout-container" style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden', position: 'relative', width: '100%' }}>
+    <div className="d-flex layout-container" style={{ minHeight: '100vh', height: '100vh', overflow: 'hidden', position: 'relative', width: '100%', maxWidth: '100vw' }}>
       {/* Mobile Sidebar Overlay */}
       {sidebarOpen && (
         <div 

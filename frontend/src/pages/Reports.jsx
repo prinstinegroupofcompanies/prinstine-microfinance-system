@@ -1202,6 +1202,112 @@ const Reports = () => {
             <div className="d-flex flex-wrap align-items-center gap-2">
               <button
                 type="button"
+                className="btn btn-sm btn-success"
+                onClick={() => {
+                  if (clientReportsList.length === 0) {
+                    toast.warning('No data to export. Apply filters and load client reports first.');
+                    return;
+                  }
+                  const isAll = clientReportsCurrency === 'ALL';
+                  const columns = [
+                    { key: 'client_number', header: 'ID#', format: (v, row) => v ?? row.id ?? '-' },
+                    { key: 'savings_id', header: 'Savings ID#', format: (v) => v ?? '-' },
+                    { key: 'name', header: 'Name', format: (v) => v ?? '-' },
+                    ...(isAll
+                      ? [
+                          { key: 'total_savings_lrd', header: 'Total Savings (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'total_savings_usd', header: 'Total Savings (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'personal_interest_lrd', header: 'Personal Interest (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'personal_interest_usd', header: 'Personal Interest (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'general_interest_lrd', header: 'General Interest (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'general_interest_usd', header: 'General Interest (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'outstanding_loan_lrd', header: 'Outstanding Loan (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'outstanding_loan_usd', header: 'Outstanding Loan (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'loan_repayment_done_lrd', header: 'Loan Repayment Done (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'loan_repayment_done_usd', header: 'Loan Repayment Done (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'loan_status', header: 'Loan Status' },
+                          { key: 'outstanding_dues_lrd', header: 'Outstanding Dues (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'outstanding_dues_usd', header: 'Outstanding Dues (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'total_dues_paid_lrd', header: 'Total Dues Paid (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'total_dues_paid_usd', header: 'Total Dues Paid (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'penalty_lrd', header: 'Penalty (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'penalty_usd', header: 'Penalty (USD)', format: (v) => formatCurrency(v, 'USD') }
+                        ]
+                      : [
+                          { key: 'total_savings', header: 'Total Savings', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'personal_interest', header: 'Personal Interest', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'general_interest', header: 'General Interest', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'outstanding_loan', header: 'Outstanding Loan', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'loan_repayment_done', header: 'Loan Repayment Done', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'loan_status', header: 'Loan Status' },
+                          { key: 'outstanding_dues', header: 'Outstanding Dues', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'total_dues_paid', header: 'Total Dues Paid', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'penalty', header: 'Penalty', format: (v) => formatCurrency(v, clientReportsCurrency) }
+                        ])
+                  ];
+                  exportToExcel(clientReportsList, columns, 'Client Reports', 'client_reports');
+                  toast.success('Client reports exported to Excel');
+                }}
+                disabled={clientReportsList.length === 0}
+                title="Export to Excel"
+              >
+                <i className="fas fa-file-excel me-1"></i>Export Excel
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-danger"
+                onClick={() => {
+                  if (clientReportsList.length === 0) {
+                    toast.warning('No data to export. Apply filters and load client reports first.');
+                    return;
+                  }
+                  const isAll = clientReportsCurrency === 'ALL';
+                  const columns = [
+                    { key: 'client_number', header: 'ID#', format: (v, row) => v ?? row.id ?? '-' },
+                    { key: 'savings_id', header: 'Savings ID#', format: (v) => v ?? '-' },
+                    { key: 'name', header: 'Name', format: (v) => v ?? '-' },
+                    ...(isAll
+                      ? [
+                          { key: 'total_savings_lrd', header: 'Total Savings (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'total_savings_usd', header: 'Total Savings (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'personal_interest_lrd', header: 'Personal Interest (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'personal_interest_usd', header: 'Personal Interest (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'general_interest_lrd', header: 'General Interest (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'general_interest_usd', header: 'General Interest (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'outstanding_loan_lrd', header: 'Outstanding Loan (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'outstanding_loan_usd', header: 'Outstanding Loan (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'loan_repayment_done_lrd', header: 'Loan Repayment Done (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'loan_repayment_done_usd', header: 'Loan Repayment Done (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'loan_status', header: 'Loan Status' },
+                          { key: 'outstanding_dues_lrd', header: 'Outstanding Dues (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'outstanding_dues_usd', header: 'Outstanding Dues (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'total_dues_paid_lrd', header: 'Total Dues Paid (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'total_dues_paid_usd', header: 'Total Dues Paid (USD)', format: (v) => formatCurrency(v, 'USD') },
+                          { key: 'penalty_lrd', header: 'Penalty (LRD)', format: (v) => formatCurrency(v, 'LRD') },
+                          { key: 'penalty_usd', header: 'Penalty (USD)', format: (v) => formatCurrency(v, 'USD') }
+                        ]
+                      : [
+                          { key: 'total_savings', header: 'Total Savings', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'personal_interest', header: 'Personal Interest', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'general_interest', header: 'General Interest', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'outstanding_loan', header: 'Outstanding Loan', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'loan_repayment_done', header: 'Loan Repayment Done', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'loan_status', header: 'Loan Status' },
+                          { key: 'outstanding_dues', header: 'Outstanding Dues', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'total_dues_paid', header: 'Total Dues Paid', format: (v) => formatCurrency(v, clientReportsCurrency) },
+                          { key: 'penalty', header: 'Penalty', format: (v) => formatCurrency(v, clientReportsCurrency) }
+                        ])
+                  ];
+                  exportToPDF(clientReportsList, columns, 'Client Reports', 'client_reports');
+                  toast.success('Client reports exported to PDF');
+                }}
+                disabled={clientReportsList.length === 0}
+                title="Export to PDF"
+              >
+                <i className="fas fa-file-pdf me-1"></i>Export PDF
+              </button>
+              <button
+                type="button"
                 className="btn btn-sm btn-outline-primary"
                 onClick={fetchClientReports}
                 disabled={clientReportsLoading}

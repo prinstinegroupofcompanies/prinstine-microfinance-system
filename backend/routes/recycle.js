@@ -149,6 +149,13 @@ const permanentDeleteClientRelations = async (clientId, transaction) => {
     });
   }
 
+  // Unlink loan repayments that reference these transactions to avoid FK violation
+  if (transactionIds.length > 0) {
+    await db.LoanRepayment.update(
+      { transaction_id: null },
+      { where: { transaction_id: { [Op.in]: transactionIds } }, transaction }
+    );
+  }
   await db.Transaction.destroy({ where: transactionWhere, force: true, transaction });
   await db.Loan.destroy({ where: { client_id: clientId }, force: true, transaction });
   await db.SavingsAccount.destroy({ where: { client_id: clientId }, force: true, transaction });
@@ -460,6 +467,10 @@ router.delete('/clients/:id', async (req, res) => {
     await permanentDeleteClientRelations(client.id, transaction);
 
     if (client.user_id) {
+      await db.Staff.update(
+        { user_id: null },
+        { where: { user_id: client.user_id }, transaction }
+      );
       await db.User.destroy({
         where: { id: client.user_id },
         force: true,
@@ -479,10 +490,11 @@ router.delete('/clients/:id', async (req, res) => {
   } catch (error) {
     await transaction.rollback();
     console.error('Permanent delete client error:', error);
+    const message = error.message || 'Failed to permanently delete client';
     res.status(500).json({
       success: false,
-      message: 'Failed to permanently delete client',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      message,
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined
     });
   }
 });
@@ -554,9 +566,10 @@ const restoreItem = async (model, id, itemName) => {
 
 // Generic permanent delete function - hard delete from DB forever
 const permanentDeleteItem = async (model, id, itemName) => {
+  const pk = parseInt(id, 10) || id;
   const item = await model.findOne({
     where: {
-      id,
+      id: pk,
       deleted_at: { [Op.ne]: null }
     },
     paranoid: false
@@ -567,7 +580,7 @@ const permanentDeleteItem = async (model, id, itemName) => {
   }
 
   // force: true = real DELETE from database (not just set deleted_at)
-  await model.destroy({ where: { id }, force: true });
+  await model.destroy({ where: { id: pk }, force: true });
   return item;
 };
 
@@ -644,16 +657,17 @@ router.post('/collections/:id/restore', async (req, res) => {
   }
 });
 
-// Helper: 404 if "not found" error, else 500
+// Helper: 404 if "not found" error, else 500 with message for frontend
 const handlePermanentDeleteError = (res, error, itemName) => {
   const isNotFound = error.message && error.message.includes('not found');
   if (isNotFound) {
     return res.status(404).json({ success: false, message: error.message });
   }
   console.error(`Permanent delete ${itemName} error:`, error);
+  const message = error.message || `Failed to permanently delete ${itemName}`;
   return res.status(500).json({
     success: false,
-    message: 'Failed to permanently delete',
+    message,
     error: process.env.NODE_ENV === 'development' ? error.message : undefined
   });
 };
@@ -841,6 +855,10 @@ router.delete('/users/:id', async (req, res) => {
       await client.destroy({ force: true, transaction });
     }
 
+    await db.Staff.update(
+      { user_id: null },
+      { where: { user_id: user.id }, transaction }
+    );
     await user.destroy({ force: true, transaction });
 
     await transaction.commit();
@@ -848,7 +866,10 @@ router.delete('/users/:id', async (req, res) => {
     res.json({ success: true, message: 'User permanently deleted' });
   } catch (error) {
     await transaction.rollback();
-    res.status(404).json({ success: false, message: error.message });
+    console.error('Permanent delete user error:', error);
+    const isNotFound = error.message && error.message.includes('not found');
+    const message = error.message || 'Failed to permanently delete user';
+    res.status(isNotFound ? 404 : 500).json({ success: false, message });
   }
 });
 
