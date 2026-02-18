@@ -141,6 +141,7 @@ const Layout = ({ children }) => {
       {/* Main Content */}
       <div className={`flex-grow-1 d-flex flex-column main-content-wrapper ${sidebarOpen ? 'sidebar-open' : 'sidebar-closed'}`} style={{ 
         minWidth: 0, 
+        maxWidth: '100%',
         height: '100vh', 
         overflow: 'hidden',
         transition: 'margin-left 0.3s ease, width 0.3s ease',
@@ -196,7 +197,7 @@ const Layout = ({ children }) => {
           </div>
         </nav>
 
-        {/* Page Content - Scrollable */}
+        {/* Page Content - Scrollable: vertical scroll here only; horizontal scroll inside .table-responsive */}
         <main className="flex-grow-1 page-content-scrollable" style={{ 
           backgroundColor: '#f8fafc',
           overflowY: 'auto',
@@ -204,10 +205,11 @@ const Layout = ({ children }) => {
           padding: '1.5rem',
           width: '100%',
           maxWidth: '100%',
+          minWidth: 0,
           height: 'calc(100vh - 56px)',
           boxSizing: 'border-box'
         }}>
-          <div className="fade-in" style={{ maxWidth: '100%', width: '100%', boxSizing: 'border-box' }}>
+          <div className="fade-in" style={{ maxWidth: '100%', width: '100%', minWidth: 0, boxSizing: 'border-box', overflowX: 'hidden' }}>
             {children}
           </div>
         </main>

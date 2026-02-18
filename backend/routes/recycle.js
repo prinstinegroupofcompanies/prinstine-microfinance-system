@@ -487,31 +487,44 @@ router.delete('/clients/:id', async (req, res) => {
   }
 });
 
-// Permanently delete loan
+// Permanently delete loan and all related records (hard delete forever)
 router.delete('/loans/:id', async (req, res) => {
+  const transaction = await db.sequelize.transaction();
   try {
     const loan = await db.Loan.findOne({
       where: {
         id: req.params.id,
         deleted_at: { [Op.ne]: null }
       },
-      paranoid: false
+      paranoid: false,
+      transaction
     });
 
     if (!loan) {
+      await transaction.rollback();
       return res.status(404).json({
         success: false,
         message: 'Deleted loan not found'
       });
     }
 
-    await loan.destroy({ force: true });
+    const loanId = loan.id;
+
+    // Delete related records first (hard delete) to avoid FK constraints
+    await db.LoanRepayment.destroy({ where: { loan_id: loanId }, force: true, transaction });
+    await db.Collection.destroy({ where: { loan_id: loanId }, force: true, transaction });
+    await db.Revenue.destroy({ where: { loan_id: loanId }, force: true, transaction });
+    await db.Transaction.destroy({ where: { loan_id: loanId }, force: true, transaction });
+    await loan.destroy({ force: true, transaction });
+
+    await transaction.commit();
 
     res.json({
       success: true,
       message: 'Loan permanently deleted'
     });
   } catch (error) {
+    await transaction.rollback();
     console.error('Permanent delete loan error:', error);
     res.status(500).json({
       success: false,
@@ -539,11 +552,11 @@ const restoreItem = async (model, id, itemName) => {
   return item;
 };
 
-// Generic permanent delete function
+// Generic permanent delete function - hard delete from DB forever
 const permanentDeleteItem = async (model, id, itemName) => {
   const item = await model.findOne({
     where: {
-      id: id,
+      id,
       deleted_at: { [Op.ne]: null }
     },
     paranoid: false
@@ -553,7 +566,8 @@ const permanentDeleteItem = async (model, id, itemName) => {
     throw new Error(`Deleted ${itemName} not found`);
   }
 
-  await item.destroy({ force: true });
+  // force: true = real DELETE from database (not just set deleted_at)
+  await model.destroy({ where: { id }, force: true });
   return item;
 };
 
@@ -630,22 +644,83 @@ router.post('/collections/:id/restore', async (req, res) => {
   }
 });
 
-// Permanent delete routes for all types
+// Helper: 404 if "not found" error, else 500
+const handlePermanentDeleteError = (res, error, itemName) => {
+  const isNotFound = error.message && error.message.includes('not found');
+  if (isNotFound) {
+    return res.status(404).json({ success: false, message: error.message });
+  }
+  console.error(`Permanent delete ${itemName} error:`, error);
+  return res.status(500).json({
+    success: false,
+    message: 'Failed to permanently delete',
+    error: process.env.NODE_ENV === 'development' ? error.message : undefined
+  });
+};
+
+// Permanent delete routes for all types (hard delete from DB forever)
 router.delete('/transactions/:id', async (req, res) => {
+  const txn = await db.sequelize.transaction();
   try {
-    await permanentDeleteItem(db.Transaction, req.params.id, 'transaction');
+    const tx = await db.Transaction.findOne({
+      where: { id: req.params.id, deleted_at: { [Op.ne]: null } },
+      paranoid: false,
+      transaction: txn
+    });
+    if (!tx) {
+      await txn.rollback();
+      return res.status(404).json({ success: false, message: 'Deleted transaction not found' });
+    }
+    await db.LoanRepayment.update(
+      { transaction_id: null },
+      { where: { transaction_id: tx.id }, transaction: txn }
+    );
+    await db.Revenue.destroy({ where: { transaction_id: tx.id }, force: true, transaction: txn });
+    await db.Transaction.destroy({ where: { id: tx.id }, force: true, transaction: txn });
+    await txn.commit();
     res.json({ success: true, message: 'Transaction permanently deleted' });
   } catch (error) {
-    res.status(404).json({ success: false, message: error.message });
+    await txn.rollback();
+    handlePermanentDeleteError(res, error, 'transaction');
   }
 });
 
 router.delete('/savings/:id', async (req, res) => {
+  const txn = await db.sequelize.transaction();
   try {
-    await permanentDeleteItem(db.SavingsAccount, req.params.id, 'savings account');
+    const savings = await db.SavingsAccount.findOne({
+      where: { id: req.params.id, deleted_at: { [Op.ne]: null } },
+      paranoid: false,
+      transaction: txn
+    });
+    if (!savings) {
+      await txn.rollback();
+      return res.status(404).json({ success: false, message: 'Deleted savings account not found' });
+    }
+    const txIds = await db.Transaction.findAll({
+      where: { savings_account_id: savings.id },
+      attributes: ['id'],
+      paranoid: false,
+      transaction: txn
+    }).then(rows => rows.map(r => r.id));
+    if (txIds.length > 0) {
+      await db.Revenue.destroy({
+        where: { transaction_id: { [Op.in]: txIds } },
+        force: true,
+        transaction: txn
+      });
+    }
+    await db.Transaction.destroy({
+      where: { savings_account_id: savings.id },
+      force: true,
+      transaction: txn
+    });
+    await db.SavingsAccount.destroy({ where: { id: savings.id }, force: true, transaction: txn });
+    await txn.commit();
     res.json({ success: true, message: 'Savings account permanently deleted' });
   } catch (error) {
-    res.status(404).json({ success: false, message: error.message });
+    await txn.rollback();
+    handlePermanentDeleteError(res, error, 'savings account');
   }
 });
 
@@ -654,7 +729,7 @@ router.delete('/collaterals/:id', async (req, res) => {
     await permanentDeleteItem(db.Collateral, req.params.id, 'collateral');
     res.json({ success: true, message: 'Collateral permanently deleted' });
   } catch (error) {
-    res.status(404).json({ success: false, message: error.message });
+    handlePermanentDeleteError(res, error, 'collateral');
   }
 });
 
@@ -663,7 +738,7 @@ router.delete('/kyc/:id', async (req, res) => {
     await permanentDeleteItem(db.KycDocument, req.params.id, 'KYC document');
     res.json({ success: true, message: 'KYC document permanently deleted' });
   } catch (error) {
-    res.status(404).json({ success: false, message: error.message });
+    handlePermanentDeleteError(res, error, 'KYC document');
   }
 });
 
@@ -672,7 +747,7 @@ router.delete('/branches/:id', async (req, res) => {
     await permanentDeleteItem(db.Branch, req.params.id, 'branch');
     res.json({ success: true, message: 'Branch permanently deleted' });
   } catch (error) {
-    res.status(404).json({ success: false, message: error.message });
+    handlePermanentDeleteError(res, error, 'branch');
   }
 });
 
@@ -681,7 +756,7 @@ router.delete('/revenues/:id', async (req, res) => {
     await permanentDeleteItem(db.Revenue, req.params.id, 'revenue');
     res.json({ success: true, message: 'Revenue permanently deleted' });
   } catch (error) {
-    res.status(404).json({ success: false, message: error.message });
+    handlePermanentDeleteError(res, error, 'revenue');
   }
 });
 
@@ -690,7 +765,7 @@ router.delete('/loan-repayments/:id', async (req, res) => {
     await permanentDeleteItem(db.LoanRepayment, req.params.id, 'loan repayment');
     res.json({ success: true, message: 'Loan repayment permanently deleted' });
   } catch (error) {
-    res.status(404).json({ success: false, message: error.message });
+    handlePermanentDeleteError(res, error, 'loan repayment');
   }
 });
 
@@ -699,7 +774,7 @@ router.delete('/collections/:id', async (req, res) => {
     await permanentDeleteItem(db.Collection, req.params.id, 'collection');
     res.json({ success: true, message: 'Collection permanently deleted' });
   } catch (error) {
-    res.status(404).json({ success: false, message: error.message });
+    handlePermanentDeleteError(res, error, 'collection');
   }
 });
 
