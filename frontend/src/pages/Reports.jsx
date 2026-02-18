@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import apiClient from '../config/axios';
 import { Bar, Line, Pie } from 'react-chartjs-2';
 import { exportToPDF, exportToExcel, formatCurrency } from '../utils/exportUtils';
@@ -107,6 +108,49 @@ const Reports = () => {
       revenueBySource: {}
     }
   });
+
+  // Client reports: list with filters and real-time data
+  const [clientReportsList, setClientReportsList] = useState([]);
+  const [clientReportsLoading, setClientReportsLoading] = useState(false);
+  const [clientReportsCurrency, setClientReportsCurrency] = useState('ALL');
+  const [clientReportsFrom, setClientReportsFrom] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toISOString().slice(0, 10);
+  });
+  const [clientReportsTo, setClientReportsTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [clientReportsSearch, setClientReportsSearch] = useState('');
+
+  const fetchClientReports = useCallback(async () => {
+    setClientReportsLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (clientReportsFrom) params.set('from', clientReportsFrom);
+      if (clientReportsTo) params.set('to', clientReportsTo);
+      if (clientReportsCurrency) params.set('currency', clientReportsCurrency);
+      if (clientReportsSearch.trim()) params.set('search', clientReportsSearch.trim());
+      const res = await apiClient.get(`/api/reports/clients?${params.toString()}`);
+      setClientReportsList(res.data?.data?.clients ?? []);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to load client reports');
+      setClientReportsList([]);
+    } finally {
+      setClientReportsLoading(false);
+    }
+  }, [clientReportsFrom, clientReportsTo, clientReportsCurrency, clientReportsSearch]);
+
+  useEffect(() => {
+    if (reportType === 'clients') {
+      fetchClientReports();
+    }
+  }, [reportType, fetchClientReports]);
+
+  // Real-time: refetch client reports every 30s when on clients tab
+  useEffect(() => {
+    if (reportType !== 'clients') return;
+    const interval = setInterval(fetchClientReports, 30000);
+    return () => clearInterval(interval);
+  }, [reportType, fetchClientReports]);
 
   // Reset chart key when switching report types to avoid canvas reuse errors
   useEffect(() => {
@@ -1153,195 +1197,194 @@ const Reports = () => {
       {/* Client Reports */}
       {reportType === 'clients' && (
         <div className="card">
-          <div className="card-header">
-            <h5 className="mb-0">Client Statistics</h5>
+          <div className="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
+            <h5 className="mb-0">Client Reports</h5>
+            <div className="d-flex flex-wrap align-items-center gap-2">
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-primary"
+                onClick={fetchClientReports}
+                disabled={clientReportsLoading}
+              >
+                <i className={`fas ${clientReportsLoading ? 'fa-spinner fa-spin' : 'fa-sync-alt'} me-1`}></i>
+                Refresh
+              </button>
+            </div>
           </div>
           <div className="card-body">
-            {loading ? (
+            {/* Filters */}
+            <div className="row g-3 mb-4">
+              <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">From</label>
+                <input
+                  type="date"
+                  className="form-control form-control-sm"
+                  value={clientReportsFrom}
+                  onChange={(e) => setClientReportsFrom(e.target.value)}
+                />
+              </div>
+              <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">To</label>
+                <input
+                  type="date"
+                  className="form-control form-control-sm"
+                  value={clientReportsTo}
+                  onChange={(e) => setClientReportsTo(e.target.value)}
+                />
+              </div>
+              <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">Currency</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={clientReportsCurrency}
+                  onChange={(e) => setClientReportsCurrency(e.target.value)}
+                >
+                  <option value="ALL">ALL</option>
+                  <option value="LRD">LRD</option>
+                  <option value="USD">USD</option>
+                </select>
+              </div>
+              <div className="col-md-6 col-lg-3">
+                <label className="form-label small text-muted">Search by name or ID</label>
+                <input
+                  type="text"
+                  className="form-control form-control-sm"
+                  placeholder="Client name or ID#..."
+                  value={clientReportsSearch}
+                  onChange={(e) => setClientReportsSearch(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && fetchClientReports()}
+                />
+              </div>
+              <div className="col-md-6 col-lg-2 d-flex align-items-end">
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm w-100"
+                  onClick={fetchClientReports}
+                  disabled={clientReportsLoading}
+                >
+                  {clientReportsLoading ? (
+                    <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                  ) : (
+                    <i className="fas fa-search me-1"></i>
+                  )}
+                  Apply
+                </button>
+              </div>
+            </div>
+
+            {clientReportsLoading && clientReportsList.length === 0 ? (
               <div className="text-center py-5">
                 <div className="spinner-border text-primary" role="status">
                   <span className="visually-hidden">Loading...</span>
                 </div>
+                <p className="text-muted mt-2 mb-0">Loading client reports...</p>
               </div>
-                ) : dashboardStats ? (
-              <>
-                {/* LRD Client Reports */}
-                <div className="row mb-4">
-                  <div className="col-12 mb-3">
-                    <h6 className="text-primary"><i className="fas fa-coins me-2"></i>LRD Client Reports</h6>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Total Savings (LRD)</div>
-                      <div className="stat-value text-info">
-                        LRD {(dashboardStats.statistics.lrd?.totalSavings || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Outstanding Savings (LRD)</div>
-                      <div className="stat-value text-success">
-                        LRD {(dashboardStats.statistics.lrd?.outstandingSavings || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Total Dues (LRD)</div>
-                      <div className="stat-value text-danger">
-                        LRD {(dashboardStats.statistics.lrd?.totalDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Outstanding Dues (LRD)</div>
-                      <div className="stat-value text-danger">
-                        LRD {(dashboardStats.statistics.lrd?.outstandingDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Monthly Dues (LRD)</div>
-                      <div className="stat-value text-warning">
-                        LRD {(dashboardStats.statistics.lrd?.monthlyDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Clients with Dues (LRD)</div>
-                      <div className="stat-value text-danger">
-                        {dashboardStats.statistics.lrd?.clientsWithOutstandingDues || 0}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Clients Paid Dues (LRD)</div>
-                      <div className="stat-value text-success">
-                        {dashboardStats.statistics.lrd?.clientsPaidDues || 0}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Total Fines (LRD)</div>
-                      <div className="stat-value text-secondary">
-                        LRD {(dashboardStats.statistics.lrd?.totalFines || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* USD Client Reports */}
-                <div className="row mb-4">
-                  <div className="col-12 mb-3">
-                    <h6 className="text-success"><i className="fas fa-dollar-sign me-2"></i>USD Client Reports</h6>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Total Savings (USD)</div>
-                      <div className="stat-value text-info">
-                        ${(dashboardStats.statistics.usd?.totalSavings || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Outstanding Savings (USD)</div>
-                      <div className="stat-value text-success">
-                        ${(dashboardStats.statistics.usd?.outstandingSavings || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Total Dues (USD)</div>
-                      <div className="stat-value text-danger">
-                        ${(dashboardStats.statistics.usd?.totalDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Outstanding Dues (USD)</div>
-                      <div className="stat-value text-danger">
-                        ${(dashboardStats.statistics.usd?.outstandingDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Monthly Dues (USD)</div>
-                      <div className="stat-value text-warning">
-                        ${(dashboardStats.statistics.usd?.monthlyDues || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Clients with Dues (USD)</div>
-                      <div className="stat-value text-danger">
-                        {dashboardStats.statistics.usd?.clientsWithOutstandingDues || 0}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Clients Paid Dues (USD)</div>
-                      <div className="stat-value text-success">
-                        {dashboardStats.statistics.usd?.clientsPaidDues || 0}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Total Fines (USD)</div>
-                      <div className="stat-value text-secondary">
-                        ${(dashboardStats.statistics.usd?.totalFines || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Overall Client Reports */}
-                <div className="row">
-                  <div className="col-12 mb-3">
-                    <h6 className="text-secondary"><i className="fas fa-users me-2"></i>Overall Client Reports</h6>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Total Clients</div>
-                      <div className="stat-value text-primary">
-                        {dashboardStats.statistics.totalClients || 0}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Active Clients</div>
-                      <div className="stat-value text-success">
-                        {dashboardStats.statistics.totalClients || 0}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="col-md-3 mb-4">
-                    <div className="stat-card">
-                      <div className="stat-label">Total Transactions</div>
-                      <div className="stat-value text-warning">
-                        {dashboardStats.statistics.totalTransactions || 0}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </>
             ) : (
-              <div className="text-center text-muted py-5">
-                No data available
+              <div className="table-responsive">
+                <table className="table table-hover table-bordered align-middle mb-0">
+                  <thead className="table-light">
+                    <tr>
+                      <th>ID#</th>
+                      <th>Savings ID#</th>
+                      <th>Name</th>
+                      {clientReportsCurrency === 'ALL' ? (
+                        <>
+                          <th className="text-end">Total Savings (LRD)</th>
+                          <th className="text-end">Total Savings (USD)</th>
+                          <th className="text-end">Personal Interest (LRD)</th>
+                          <th className="text-end">Personal Interest (USD)</th>
+                          <th className="text-end">General Interest (LRD)</th>
+                          <th className="text-end">General Interest (USD)</th>
+                          <th className="text-end">Outstanding Loan (LRD)</th>
+                          <th className="text-end">Outstanding Loan (USD)</th>
+                          <th className="text-end">Loan Repayment Done (LRD)</th>
+                          <th className="text-end">Loan Repayment Done (USD)</th>
+                          <th>Loan Status</th>
+                          <th className="text-end">Outstanding Dues (LRD)</th>
+                          <th className="text-end">Outstanding Dues (USD)</th>
+                          <th className="text-end">Total Dues Paid (LRD)</th>
+                          <th className="text-end">Total Dues Paid (USD)</th>
+                          <th className="text-end">Penalty (LRD)</th>
+                          <th className="text-end">Penalty (USD)</th>
+                        </>
+                      ) : (
+                        <>
+                          <th className="text-end">Total Savings</th>
+                          <th className="text-end">Personal Interest</th>
+                          <th className="text-end">General Interest</th>
+                          <th className="text-end">Outstanding Loan</th>
+                          <th className="text-end">Loan Repayment Done</th>
+                          <th>Loan Status</th>
+                          <th className="text-end">Outstanding Dues</th>
+                          <th className="text-end">Total Dues Paid</th>
+                          <th className="text-end">Penalty</th>
+                        </>
+                      )}
+                      <th className="text-center">Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {clientReportsList.length === 0 ? (
+                      <tr>
+                        <td colSpan={clientReportsCurrency === 'ALL' ? 22 : 13} className="text-center text-muted py-4">
+                          No clients match the filters. Try adjusting dates, currency, or search.
+                        </td>
+                      </tr>
+                    ) : (
+                      clientReportsList.map((row) => (
+                        <tr key={row.id}>
+                          <td>{row.client_number ?? row.id}</td>
+                          <td>{row.savings_id ?? '-'}</td>
+                          <td>{row.name ?? '-'}</td>
+                          {clientReportsCurrency === 'ALL' ? (
+                            <>
+                              <td className="text-end">{formatCurrency(row.total_savings_lrd, 'LRD')}</td>
+                              <td className="text-end">{formatCurrency(row.total_savings_usd, 'USD')}</td>
+                              <td className="text-end">{formatCurrency(row.personal_interest_lrd, 'LRD')}</td>
+                              <td className="text-end">{formatCurrency(row.personal_interest_usd, 'USD')}</td>
+                              <td className="text-end">{formatCurrency(row.general_interest_lrd, 'LRD')}</td>
+                              <td className="text-end">{formatCurrency(row.general_interest_usd, 'USD')}</td>
+                              <td className="text-end">{formatCurrency(row.outstanding_loan_lrd, 'LRD')}</td>
+                              <td className="text-end">{formatCurrency(row.outstanding_loan_usd, 'USD')}</td>
+                              <td className="text-end">{formatCurrency(row.loan_repayment_done_lrd, 'LRD')}</td>
+                              <td className="text-end">{formatCurrency(row.loan_repayment_done_usd, 'USD')}</td>
+                              <td><span className="badge bg-secondary">{row.loan_status ?? '-'}</span></td>
+                              <td className="text-end">{formatCurrency(row.outstanding_dues_lrd, 'LRD')}</td>
+                              <td className="text-end">{formatCurrency(row.outstanding_dues_usd, 'USD')}</td>
+                              <td className="text-end">{formatCurrency(row.total_dues_paid_lrd, 'LRD')}</td>
+                              <td className="text-end">{formatCurrency(row.total_dues_paid_usd, 'USD')}</td>
+                              <td className="text-end">{formatCurrency(row.penalty_lrd, 'LRD')}</td>
+                              <td className="text-end">{formatCurrency(row.penalty_usd, 'USD')}</td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="text-end">{formatCurrency(row.total_savings, clientReportsCurrency)}</td>
+                              <td className="text-end">{formatCurrency(row.personal_interest, clientReportsCurrency)}</td>
+                              <td className="text-end">{formatCurrency(row.general_interest, clientReportsCurrency)}</td>
+                              <td className="text-end">{formatCurrency(row.outstanding_loan, clientReportsCurrency)}</td>
+                              <td className="text-end">{formatCurrency(row.loan_repayment_done, clientReportsCurrency)}</td>
+                              <td><span className="badge bg-secondary">{row.loan_status ?? '-'}</span></td>
+                              <td className="text-end">{formatCurrency(row.outstanding_dues, clientReportsCurrency)}</td>
+                              <td className="text-end">{formatCurrency(row.total_dues_paid, clientReportsCurrency)}</td>
+                              <td className="text-end">{formatCurrency(row.penalty, clientReportsCurrency)}</td>
+                            </>
+                          )}
+                          <td className="text-center">
+                            <Link to={`/clients/${row.id}`} className="btn btn-sm btn-outline-primary" title="View client details">
+                              <i className="fas fa-user me-1"></i>View
+                            </Link>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
+            )}
+            {!clientReportsLoading && clientReportsList.length > 0 && (
+              <p className="text-muted small mt-2 mb-0">
+                Showing {clientReportsList.length} client(s). Data refreshes when you change filters or every 30 seconds.
+              </p>
             )}
           </div>
         </div>
