@@ -466,20 +466,23 @@ router.delete('/clients/:id', async (req, res) => {
 
     await permanentDeleteClientRelations(client.id, transaction);
 
-    if (client.user_id) {
+    const userIdToDelete = client.user_id;
+
+    // Delete client first so clients.user_id no longer references the user (FK client_user_id_fkey)
+    await client.destroy({ force: true, transaction });
+
+    if (userIdToDelete) {
       await db.Staff.update(
         { user_id: null },
-        { where: { user_id: client.user_id }, transaction }
+        { where: { user_id: userIdToDelete }, transaction }
       );
       await db.User.destroy({
-        where: { id: client.user_id },
+        where: { id: userIdToDelete },
         force: true,
         transaction,
         paranoid: false
       });
     }
-
-    await client.destroy({ force: true, transaction }); // Permanent delete
 
     await transaction.commit();
 

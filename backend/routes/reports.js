@@ -38,6 +38,8 @@ router.get('/clients', async (req, res) => {
     if (branchId && userRole !== 'admin' && userRole !== 'general_manager') {
       clientWhere[Op.and].push({ branch_id: branchId });
     }
+    // Only active, non-deleted clients in reports (exclude inactive, suspended, and soft-deleted)
+    clientWhere[Op.and].push({ status: 'active' });
     if (search && String(search).trim()) {
       const term = `%${String(search).trim()}%`;
       clientWhere[Op.and].push({
@@ -66,8 +68,7 @@ router.get('/clients', async (req, res) => {
     const clients = await db.Client.findAll({
       where: clientWhere,
       attributes: ['id', 'client_number', 'first_name', 'last_name', 'total_dues', 'dues_currency'],
-      order: [['client_number', 'ASC']],
-      paranoid: false
+      order: [['client_number', 'ASC']]
     });
 
     const clientIds = clients.map(c => c.id);
