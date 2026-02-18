@@ -1,4 +1,5 @@
 const express = require('express');
+const { Op } = require('sequelize');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
@@ -29,6 +30,15 @@ router.get('/', async (req, res) => {
       if (!isNaN(queryClientId)) {
         whereClause.client_id = queryClientId;
       }
+    }
+
+    if (req.query.status) {
+      whereClause.status = req.query.status;
+    }
+    if (req.query.type) {
+      const typeVal = req.query.type;
+      const types = Array.isArray(typeVal) ? typeVal : (typeof typeVal === 'string' ? typeVal.split(',') : [typeVal]);
+      whereClause.type = types.length === 1 ? types[0] : { [Op.in]: types };
     }
 
     // Get limit from query params, default to 100

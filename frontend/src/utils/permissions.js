@@ -9,6 +9,9 @@ export const ROLES = {
   BORROWER: 'borrower',
 };
 
+// Roles that can approve loans, savings accounts, and transactions (deposits/withdrawals)
+export const APPROVER_ROLES = ['admin', 'head_micro_loan', 'supervisor'];
+
 // Permission definitions for each role
 export const ROLE_PERMISSIONS = {
   [ROLES.ADMIN]: {

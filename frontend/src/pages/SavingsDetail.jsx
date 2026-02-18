@@ -5,11 +5,13 @@ import { toast } from 'react-toastify';
 import { useAuth } from '../contexts/AuthContext';
 import moment from 'moment';
 import Receipt from '../components/Receipt';
+import { APPROVER_ROLES } from '../utils/permissions';
 
 const SavingsDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const canApproveTransaction = APPROVER_ROLES.includes(user?.role);
   const [savingsAccount, setSavingsAccount] = useState(null);
   const [transactions, setTransactions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -281,6 +283,24 @@ const SavingsDetail = () => {
                             </span>
                           </td>
                           <td>
+                            {canApproveTransaction &&
+                              transaction.status === 'pending' &&
+                              ['deposit', 'withdrawal'].includes(transaction.type) && (
+                              <button
+                                className="btn btn-sm btn-outline-success me-1"
+                                onClick={async () => {
+                                  try {
+                                    await apiClient.post(`/api/transactions/${transaction.id}/approve`);
+                                    toast.success('Transaction approved');
+                                    fetchSavingsAccount();
+                                  } catch (err) {
+                                    toast.error(err.response?.data?.message || 'Failed to approve');
+                                  }
+                                }}
+                              >
+                                <i className="fas fa-check"></i> Approve
+                              </button>
+                            )}
                             <button
                               className="btn btn-sm btn-outline-primary"
                               onClick={() => setReceipt({

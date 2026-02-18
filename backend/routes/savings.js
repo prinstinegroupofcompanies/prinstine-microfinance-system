@@ -26,6 +26,10 @@ router.get('/', async (req, res) => {
       }
     }
 
+    if (req.query.status) {
+      whereClause.status = req.query.status;
+    }
+
     const savingsAccounts = await db.SavingsAccount.findAll({
       where: whereClause,
       include: [

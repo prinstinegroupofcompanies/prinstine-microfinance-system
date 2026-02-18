@@ -4,6 +4,7 @@ import apiClient from '../config/axios';
 import { toast } from 'react-toastify';
 import { useAuth } from '../contexts/AuthContext';
 import moment from 'moment';
+import { APPROVER_ROLES } from '../utils/permissions';
 
 const LoanDetail = () => {
   const { id } = useParams();
@@ -385,6 +386,7 @@ const LoanDetail = () => {
   }
 
   const isAdmin = user?.role === 'admin';
+  const canApproveLoan = APPROVER_ROLES.includes(user?.role);
   const schedule = loan.repayment_schedule 
     ? (typeof loan.repayment_schedule === 'string' ? JSON.parse(loan.repayment_schedule) : loan.repayment_schedule)
     : [];
@@ -416,7 +418,7 @@ const LoanDetail = () => {
               <i className="fas fa-money-bill-wave me-2"></i>Make Repayment
             </button>
           )}
-          {loan.status === 'pending' && (
+          {canApproveLoan && loan.status === 'pending' && (
             <button
               className="btn btn-success me-2"
               onClick={handleApprove}

@@ -704,6 +704,39 @@ router.post('/:id/approve', authenticate, authorize('admin', 'head_micro_loan', 
   }
 });
 
+// Reject loan (cancel pending)
+router.post('/:id/reject', authenticate, authorize('admin', 'head_micro_loan', 'supervisor'), async (req, res) => {
+  try {
+    const loan = await db.Loan.findByPk(req.params.id);
+    if (!loan) {
+      return res.status(404).json({
+        success: false,
+        message: 'Loan not found'
+      });
+    }
+    if (loan.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only pending loans can be rejected'
+      });
+    }
+
+    await loan.update({ status: 'cancelled' });
+
+    res.json({
+      success: true,
+      message: 'Loan rejected successfully',
+      data: { loan }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reject loan',
+      error: error.message
+    });
+  }
+});
+
 // Disburse loan
 router.post('/:id/disburse', authenticate, authorize('admin', 'branch_manager', 'general_manager', 'finance'), async (req, res) => {
   try {

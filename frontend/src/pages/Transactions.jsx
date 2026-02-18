@@ -4,6 +4,7 @@ import { toast } from 'react-toastify';
 import { useAuth } from '../contexts/AuthContext';
 import Receipt from '../components/Receipt';
 import { exportToPDF, exportToExcel, formatDate, formatCurrency, formatDateTime } from '../utils/exportUtils';
+import { APPROVER_ROLES } from '../utils/permissions';
 
 const Transactions = () => {
   const { user } = useAuth();
@@ -247,6 +248,17 @@ const Transactions = () => {
     }
   };
 
+  const handleApproveTransaction = async (transactionId) => {
+    try {
+      await apiClient.post(`/api/transactions/${transactionId}/approve`);
+      toast.success('Transaction approved successfully');
+      fetchTransactions();
+    } catch (error) {
+      console.error('Failed to approve transaction:', error);
+      toast.error(error.response?.data?.message || 'Failed to approve transaction');
+    }
+  };
+
   const handleExportPDF = () => {
     const columns = [
       { key: 'transaction_number', header: 'Transaction Number' },
@@ -434,6 +446,17 @@ const Transactions = () => {
                             </button>
                             {user?.role !== 'borrower' && (
                               <>
+                                {APPROVER_ROLES.includes(user?.role) &&
+                                  transaction.status === 'pending' &&
+                                  ['deposit', 'withdrawal'].includes(transaction.type) && (
+                                  <button
+                                    className="btn btn-sm btn-outline-success"
+                                    onClick={() => handleApproveTransaction(transaction.id)}
+                                    title="Approve"
+                                  >
+                                    <i className="fas fa-check"></i>
+                                  </button>
+                                )}
                                 <button
                                   className="btn btn-sm btn-outline-primary"
                                   onClick={() => handleEdit(transaction.id)}

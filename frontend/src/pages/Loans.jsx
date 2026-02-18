@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import Receipt from '../components/Receipt';
 import { exportToPDF, exportToExcel, formatDate, formatCurrency } from '../utils/exportUtils';
+import { APPROVER_ROLES } from '../utils/permissions';
 
 const Loans = () => {
   const { user } = useAuth();
@@ -777,7 +778,7 @@ const Loans = () => {
                                 <i className="fas fa-edit"></i>
                               </button>
                             )}
-                            {['admin', 'head_micro_loan', 'supervisor'].includes(user?.role) && loan.status === 'pending' && (
+                            {APPROVER_ROLES.includes(user?.role) && loan.status === 'pending' && (
                               <button
                                 className="btn btn-sm btn-outline-success"
                                 onClick={() => handleApprove(loan.id)}

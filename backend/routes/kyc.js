@@ -13,7 +13,9 @@ router.use(authenticate);
 // Get all KYC documents
 router.get('/', async (req, res) => {
   try {
+    const whereClause = req.query.status ? { status: req.query.status } : {};
     const documents = await db.KycDocument.findAll({
+      where: Object.keys(whereClause).length ? whereClause : {},
       include: [{ model: db.Client, as: 'client', required: false }],
       order: [['createdAt', 'DESC']]
     });
