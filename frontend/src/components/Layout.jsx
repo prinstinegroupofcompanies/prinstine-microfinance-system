@@ -104,15 +104,41 @@ const Layout = ({ children }) => {
 
           <nav className="nav flex-column">
             {filteredMenuItems.map((item) => (
-              <Link
-                key={item.path}
-                to={item.path}
-                className={`sidebar-link ${isActive(item.path) ? 'active' : ''}`}
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <i className={item.icon}></i>
-                <span>{item.label}</span>
-              </Link>
+              <React.Fragment key={item.path}>
+                {item.children && item.children.length > 0 ? (
+                  <>
+                    <Link
+                      to={item.path}
+                      className={`sidebar-link ${location.pathname.startsWith(item.path) ? 'active' : ''}`}
+                      onClick={() => setMobileMenuOpen(false)}
+                    >
+                      <i className={item.icon}></i>
+                      <span>{item.label}</span>
+                    </Link>
+                    {item.children.map((child) => (
+                      <Link
+                        key={child.path}
+                        to={child.path}
+                        className={`sidebar-link sidebar-link-child ${isActive(child.path) ? 'active' : ''}`}
+                        onClick={() => setMobileMenuOpen(false)}
+                        style={{ paddingLeft: '2rem', fontSize: '0.9rem' }}
+                      >
+                        <i className={child.icon}></i>
+                        <span>{child.label}</span>
+                      </Link>
+                    ))}
+                  </>
+                ) : (
+                  <Link
+                    to={item.path}
+                    className={`sidebar-link ${isActive(item.path) ? 'active' : ''}`}
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    <i className={item.icon}></i>
+                    <span>{item.label}</span>
+                  </Link>
+                )}
+              </React.Fragment>
             ))}
           </nav>
         </div>

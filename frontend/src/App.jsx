@@ -177,6 +177,16 @@ function App() {
             }
           />
           <Route
+            path="/reports/:section"
+            element={
+              <PrivateRoute>
+                <Layout>
+                  <Reports />
+                </Layout>
+              </PrivateRoute>
+            }
+          />
+          <Route
             path="/borrower-reports"
             element={
               <PrivateRoute>

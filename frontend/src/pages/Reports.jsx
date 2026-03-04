@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useParams, useNavigate } from 'react-router-dom';
 import apiClient from '../config/axios';
 import { Bar, Line, Pie } from 'react-chartjs-2';
 import { exportToPDF, exportToExcel, formatCurrency } from '../utils/exportUtils';
@@ -32,8 +32,15 @@ ChartJS.register(
   Filler
 );
 
+const REPORT_SECTIONS = ['financial', 'portfolio', 'clients', 'performance', 'revenue'];
+
 const Reports = () => {
-  const [reportType, setReportType] = useState('financial');
+  const { section: urlSection } = useParams();
+  const navigate = useNavigate();
+  const [reportType, setReportType] = useState(() => {
+    const s = (urlSection || 'financial').toLowerCase();
+    return REPORT_SECTIONS.includes(s) ? s : 'financial';
+  });
   const [chartKey, setChartKey] = useState(0);
   const [dashboardStats, setDashboardStats] = useState(null);
   const [historicalData, setHistoricalData] = useState(null);
@@ -151,6 +158,21 @@ const Reports = () => {
     const interval = setInterval(fetchClientReports, 30000);
     return () => clearInterval(interval);
   }, [reportType, fetchClientReports]);
+
+  // Sync report type from URL (e.g. when using sidebar links)
+  useEffect(() => {
+    const s = (urlSection || 'financial').toLowerCase();
+    if (REPORT_SECTIONS.includes(s) && s !== reportType) {
+      setReportType(s);
+    }
+  }, [urlSection]);
+
+  // Redirect /reports to /reports/financial so sidebar section is active
+  useEffect(() => {
+    if (!urlSection) {
+      navigate('/reports/financial', { replace: true });
+    }
+  }, [urlSection, navigate]);
 
   // Reset chart key when switching report types to avoid canvas reuse errors
   useEffect(() => {
@@ -625,6 +647,11 @@ const Reports = () => {
     toast.success('Reports exported to Excel successfully!');
   };
 
+  const setReportSection = (section) => {
+    setReportType(section);
+    navigate(`/reports/${section}`, { replace: true });
+  };
+
   return (
     <div className="fade-in">
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -655,7 +682,7 @@ const Reports = () => {
         <li className="nav-item">
           <button
             className={`nav-link ${reportType === 'financial' ? 'active' : ''}`}
-            onClick={() => setReportType('financial')}
+            onClick={() => setReportSection('financial')}
           >
             <i className="fas fa-chart-line me-2"></i>Financial Reports
           </button>
@@ -663,7 +690,7 @@ const Reports = () => {
         <li className="nav-item">
           <button
             className={`nav-link ${reportType === 'portfolio' ? 'active' : ''}`}
-            onClick={() => setReportType('portfolio')}
+            onClick={() => setReportSection('portfolio')}
           >
             <i className="fas fa-hand-holding-usd me-2"></i>Loan Portfolio
           </button>
@@ -671,7 +698,7 @@ const Reports = () => {
         <li className="nav-item">
           <button
             className={`nav-link ${reportType === 'clients' ? 'active' : ''}`}
-            onClick={() => setReportType('clients')}
+            onClick={() => setReportSection('clients')}
           >
             <i className="fas fa-users me-2"></i>Client Reports
           </button>
@@ -679,7 +706,7 @@ const Reports = () => {
         <li className="nav-item">
           <button
             className={`nav-link ${reportType === 'performance' ? 'active' : ''}`}
-            onClick={() => setReportType('performance')}
+            onClick={() => setReportSection('performance')}
           >
             <i className="fas fa-tachometer-alt me-2"></i>Performance
           </button>
@@ -687,7 +714,7 @@ const Reports = () => {
         <li className="nav-item">
           <button
             className={`nav-link ${reportType === 'revenue' ? 'active' : ''}`}
-            onClick={() => setReportType('revenue')}
+            onClick={() => setReportSection('revenue')}
           >
             <i className="fas fa-dollar-sign me-2"></i>Revenue
           </button>

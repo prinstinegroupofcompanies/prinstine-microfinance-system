@@ -266,13 +266,20 @@ export const getMenuItemsForRole = (userRole) => {
       excludeRoles: ['borrower', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'branch_manager', 'loan_officer', 'hr', 'teller', 'customer_service']
     },
     
-    // Reports - Managers and officers
+    // Reports - Managers and officers (with section sub-items in sidebar)
     { 
       path: '/reports', 
       icon: 'fas fa-chart-bar', 
       label: 'Reports', 
       roles: ['admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance', 'general_manager', 'branch_manager', 'accountant'],
-      excludeRoles: ['borrower', 'loan_officer', 'hr', 'teller', 'customer_service']
+      excludeRoles: ['borrower', 'loan_officer', 'hr', 'teller', 'customer_service'],
+      children: [
+        { path: '/reports/financial', icon: 'fas fa-chart-line', label: 'Financial Reports', roles: ['admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance', 'general_manager', 'branch_manager', 'accountant'] },
+        { path: '/reports/portfolio', icon: 'fas fa-hand-holding-usd', label: 'Loan Portfolio', roles: ['admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance', 'general_manager', 'branch_manager', 'accountant'] },
+        { path: '/reports/clients', icon: 'fas fa-users', label: 'Client Reports', roles: ['admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance', 'general_manager', 'branch_manager', 'accountant'] },
+        { path: '/reports/performance', icon: 'fas fa-tachometer-alt', label: 'Performance', roles: ['admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance', 'general_manager', 'branch_manager', 'accountant'] },
+        { path: '/reports/revenue', icon: 'fas fa-dollar-sign', label: 'Revenue', roles: ['admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance', 'general_manager', 'branch_manager', 'accountant'] },
+      ]
     },
     
     // Borrower Reports - Borrowers only
