@@ -977,7 +977,7 @@ router.get('/:id/schedule', authenticate, async (req, res) => {
 router.post('/:id/repay', authenticate, [
   body('amount').isFloat({ min: 0.01 }).withMessage('Valid payment amount is required'),
   body('payment_method').optional().isIn(['cash', 'bank_transfer', 'mobile_money', 'check']),
-  body('payment_date').optional().isISO8601()
+  body('payment_date').optional().matches(/^\d{4}-\d{2}-\d{2}(T|\s|$)/).withMessage('Invalid date format (use YYYY-MM-DD)')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -1050,6 +1050,17 @@ router.post('/:id/repay', authenticate, [
     let principalAmount = paymentAmount;
     let penaltyAmount = 0;
 
+    // Normalize payment date: YYYY-MM-DD string for DATEONLY, Date for DATE
+    const paymentDateStr = req.body.payment_date && /^\d{4}-\d{2}-\d{2}/.test(String(req.body.payment_date))
+      ? String(req.body.payment_date).substring(0, 10)
+      : new Date().toISOString().split('T')[0];
+    const paymentDateForDb = req.body.payment_date ? new Date(req.body.payment_date) : new Date();
+    if (isNaN(paymentDateForDb.getTime())) paymentDateForDb.setTime(Date.now());
+
+    const paymentMethod = ['cash', 'bank_transfer', 'mobile_money', 'check'].includes(req.body.payment_method)
+      ? req.body.payment_method
+      : 'cash';
+
     if (nextRepayment) {
       // Apply to schedule: use schedule interest/principal split
       interestAmount = Math.min(paymentAmount, parseFloat(nextRepayment.interest_amount || 0));
@@ -1063,8 +1074,8 @@ router.post('/:id/repay', authenticate, [
           principal_amount: principalAmount,
           interest_amount: interestAmount,
           penalty_amount: penaltyAmount,
-          payment_date: req.body.payment_date || new Date().toISOString().split('T')[0],
-          payment_method: req.body.payment_method || 'cash',
+          payment_date: paymentDateStr,
+          payment_method: paymentMethod,
           status: 'completed',
           transaction_id: null
         });
@@ -1074,41 +1085,82 @@ router.post('/:id/repay', authenticate, [
           principal_amount: principalAmount,
           interest_amount: interestAmount,
           penalty_amount: penaltyAmount,
-          payment_date: req.body.payment_date || new Date().toISOString().split('T')[0],
-          payment_method: req.body.payment_method || 'cash',
+          payment_date: paymentDateStr,
+          payment_method: paymentMethod,
           status: 'partial'
         });
       }
     }
-    // If no nextRepayment, we still process payment below (ad-hoc: full amount as principal)
 
-    // Create main loan payment transaction
-    // Inherit currency from loan
-    const loanCurrency = loan.currency || 'USD';
-    
-    const transactionCount = await db.Transaction.count();
-    const transactionNumber = `TXN${String(transactionCount + 1).padStart(8, '0')}`;
+    // Generate unique transaction number (avoid 500 from duplicate TXN in production)
+    let transactionNumber;
+    try {
+      const lastTxn = await db.Transaction.findOne({
+        attributes: ['transaction_number'],
+        order: [['id', 'DESC']],
+        paranoid: false
+      });
+      let seq = 1;
+      if (lastTxn?.transaction_number) {
+        const num = parseInt(String(lastTxn.transaction_number).replace(/\D/g, ''), 10) || 0;
+        seq = num + 1;
+      }
+      let attempts = 0;
+      do {
+        transactionNumber = `TXN${String(seq).padStart(8, '0')}`;
+        const exists = await db.Transaction.findOne({ where: { transaction_number: transactionNumber }, paranoid: false });
+        if (!exists) break;
+        seq++;
+        attempts++;
+      } while (attempts < 100);
+      if (!transactionNumber) transactionNumber = `TXN${String(Date.now()).slice(-8)}`;
+    } catch (e) {
+      transactionNumber = `TXN${String(Date.now()).slice(-8)}`;
+    }
 
-    const transaction = await db.Transaction.create({
-      transaction_number: transactionNumber,
-      client_id: loan.client_id,
-      loan_id: loan.id,
-      type: 'loan_payment',
-      amount: paymentAmount,
-      currency: loanCurrency, // Inherit currency from loan
-      description: `Loan repayment for ${loan.loan_number}`,
-      transaction_date: req.body.payment_date || new Date(),
-      status: 'completed',
-      branch_id: loan.branch_id,
-      created_by: req.userId
-    });
+    let transaction;
+    try {
+      transaction = await db.Transaction.create({
+        transaction_number: transactionNumber,
+        client_id: loan.client_id,
+        loan_id: loan.id,
+        type: 'loan_payment',
+        amount: paymentAmount,
+        currency: loan.currency || 'USD',
+        description: `Loan repayment for ${loan.loan_number}`,
+        transaction_date: paymentDateForDb,
+        status: 'completed',
+        branch_id: loan.branch_id || null,
+        created_by: req.userId
+      });
+    } catch (createErr) {
+      if (createErr.name === 'SequelizeUniqueConstraintError' && createErr.fields?.transaction_number) {
+        transactionNumber = `TXN${String(Date.now()).slice(-8)}`;
+        transaction = await db.Transaction.create({
+          transaction_number: transactionNumber,
+          client_id: loan.client_id,
+          loan_id: loan.id,
+          type: 'loan_payment',
+          amount: paymentAmount,
+          currency: loan.currency || 'USD',
+          description: `Loan repayment for ${loan.loan_number}`,
+          transaction_date: paymentDateForDb,
+          status: 'completed',
+          branch_id: loan.branch_id || null,
+          created_by: req.userId
+        });
+      } else {
+        throw createErr;
+      }
+    }
 
     // Link transaction to repayment: either the schedule row we updated or a new ad-hoc row
+    const loanCurrency = loan.currency || 'USD';
     if (nextRepayment) {
       await nextRepayment.update({ transaction_id: transaction.id });
     } else {
-      // No schedule: create one ad-hoc repayment record for this payment
-      const adHocRepaymentNumber = `${loan.loan_number}-ADHOC-${String(Date.now()).slice(-6)}`;
+      // No schedule: create one ad-hoc repayment record for this payment (unique repayment_number)
+      const adHocRepaymentNumber = `${loan.loan_number}-ADHOC-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
       nextRepayment = await db.LoanRepayment.create({
         loan_id: loan.id,
         repayment_number: adHocRepaymentNumber,
@@ -1117,11 +1169,11 @@ router.post('/:id/repay', authenticate, [
         principal_amount: principalAmount,
         interest_amount: interestAmount,
         penalty_amount: penaltyAmount,
-        payment_date: req.body.payment_date || new Date().toISOString().split('T')[0],
-        payment_method: req.body.payment_method || 'cash',
+        payment_date: paymentDateStr,
+        payment_method: paymentMethod,
         status: 'completed',
         transaction_id: transaction.id,
-        due_date: req.body.payment_date || new Date().toISOString().split('T')[0],
+        due_date: paymentDateStr,
         created_by: req.userId
       });
     }
@@ -1161,7 +1213,7 @@ router.post('/:id/repay', authenticate, [
                   amount: adminShare,
                   currency: loanCurrency,
                   description: `Admin revenue share from ${loan.loan_type} loan ${loan.loan_number} interest payment`,
-                  revenue_date: req.body.payment_date || new Date(),
+                  revenue_date: paymentDateForDb,
                   created_by: req.userId
                 });
                 revenueUnique = true;
@@ -1204,7 +1256,7 @@ router.post('/:id/repay', authenticate, [
                   amount: clientShare,
                   currency: loanCurrency,
                   description: `Personal interest share (${(distribution.client * 100).toFixed(0)}%) from ${loan.loan_type} loan ${loan.loan_number}`,
-                  transaction_date: req.body.payment_date || new Date(),
+                  transaction_date: paymentDateForDb,
                   status: 'completed',
                   branch_id: loan.branch_id,
                   created_by: req.userId
@@ -1258,7 +1310,7 @@ router.post('/:id/repay', authenticate, [
                       amount: generalInterestSharePerAccount,
                       currency: loanCurrency,
                       description: `General interest share (${(distribution.general * 100).toFixed(0)}%) from ${loan.loan_type} loan ${loan.loan_number}`,
-                      transaction_date: req.body.payment_date || new Date(),
+                      transaction_date: paymentDateForDb,
                       status: 'completed',
                       branch_id: loan.branch_id,
                       created_by: req.userId
@@ -1330,17 +1382,28 @@ router.post('/:id/repay', authenticate, [
           penalty: penaltyAmount,
           date: transaction.transaction_date,
           outstanding_balance: newOutstanding,
-          payment_method: req.body.payment_method || 'cash',
+          payment_method: paymentMethod,
           description: req.body.description || `Loan repayment for ${loan.loan_number}`
         }
       }
     });
   } catch (error) {
     console.error('Repayment error:', error);
+    console.error('Repayment error name:', error?.name);
+    console.error('Repayment error message:', error?.message);
+    const isDev = process.env.NODE_ENV === 'development';
+    let message = 'Failed to process repayment. Please try again.';
+    if (error?.name === 'SequelizeUniqueConstraintError') {
+      message = 'A duplicate transaction or repayment was detected. Please try again.';
+    } else if (error?.name === 'SequelizeValidationError') {
+      message = error.message || 'Invalid data for repayment.';
+    } else if (error?.message) {
+      message = isDev ? error.message : message;
+    }
     res.status(500).json({
       success: false,
-      message: 'Failed to process repayment',
-      error: error.message
+      message,
+      error: isDev ? error.message : undefined
     });
   }
 });
