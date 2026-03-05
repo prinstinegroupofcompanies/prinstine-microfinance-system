@@ -1178,180 +1178,31 @@ router.post('/:id/repay', authenticate, [
       });
     }
 
-    // Handle interest distribution: 50% loan owner, 20% company (revenue), 30% users with savings
-    if (interestAmount > 0) {
-      const { getLoanTypeConfig } = require('../config/loanTypes');
-      const loanTypeConfig = getLoanTypeConfig(loan.loan_type);
-      const distribution = loanTypeConfig.interestDistribution || { admin: 0.20, client: 0.50, general: 0.30 };
+    // Repayment only affects this loan (principal + interest). Interest is passed to borrowers via separate transactions.
+    // Reduce outstanding by full payment amount so balance reaches zero when total repayments equal total_amount (principal + interest)
+    const totalAmountDue = parseFloat(loan.total_amount ?? loan.amount ?? 0);
+    const newOutstanding = Math.max(0, outstandingBalance - paymentAmount);
+    const newTotalPaid = parseFloat(loan.total_paid || 0) + paymentAmount;
 
-      if (distribution.admin !== undefined || distribution.client !== undefined || distribution.general !== undefined) {
-        const admin = distribution.admin !== undefined ? distribution.admin : 0.20;
-        const client = distribution.client !== undefined ? distribution.client : 0.50;
-        const general = distribution.general !== undefined ? distribution.general : 0.30;
-        
-        // Calculate shares
-        const adminShare = interestAmount * admin;
-        const clientShare = interestAmount * client;
-        const generalShare = interestAmount * general;
-        
-        // Create Revenue entry for admin share (use unique revenue_number to avoid constraint errors)
-        if (adminShare > 0) {
-          let revenueUnique = false;
-          let revenueAttempts = 0;
-          const revenueMaxAttempts = 10;
-          while (!revenueUnique && revenueAttempts < revenueMaxAttempts) {
-            try {
-              const revenueCount = await db.Revenue.count({ paranoid: false });
-              const revenueNumber = `REV${String(revenueCount + 1 + revenueAttempts).padStart(8, '0')}`;
-              const existingRev = await db.Revenue.findOne({ where: { revenue_number: revenueNumber }, paranoid: false });
-              if (!existingRev) {
-                await db.Revenue.create({
-                  revenue_number: revenueNumber,
-                  source: 'loan_interest',
-                  loan_id: loan.id,
-                  transaction_id: transaction.id,
-                  amount: adminShare,
-                  currency: loanCurrency,
-                  description: `Admin revenue share from ${loan.loan_type} loan ${loan.loan_number} interest payment`,
-                  revenue_date: paymentDateForDb,
-                  created_by: req.userId
-                });
-                revenueUnique = true;
-              } else {
-                revenueAttempts++;
-              }
-            } catch (revenueError) {
-              console.error('Error creating revenue entry:', revenueError);
-              revenueAttempts++;
-              if (revenueAttempts >= revenueMaxAttempts) break;
-            }
-          }
-        }
-
-        // Personal Interest: always create transaction so client sees it on dashboard; credit savings if they have an account
-        if (clientShare > 0) {
-          const savingsAccounts = await db.SavingsAccount.findAll({
-            where: {
-              client_id: loan.client_id,
-              status: 'active',
-              currency: loanCurrency
-            }
-          });
-          const firstSavingsId = savingsAccounts.length > 0 ? savingsAccounts[0].id : null;
-
-          let personalTxnUnique = false;
-          let personalTxnAttempts = 0;
-          while (!personalTxnUnique && personalTxnAttempts < 10) {
-            try {
-              const txnCount = await db.Transaction.count({ paranoid: false });
-              const personalTxnNumber = `TXN${String(txnCount + 1 + personalTxnAttempts).padStart(8, '0')}`;
-              const existingTxn = await db.Transaction.findOne({ where: { transaction_number: personalTxnNumber }, paranoid: false });
-              if (!existingTxn) {
-                await db.Transaction.create({
-                  transaction_number: personalTxnNumber,
-                  client_id: loan.client_id,
-                  loan_id: loan.id,
-                  savings_account_id: firstSavingsId,
-                  type: 'personal_interest_payment',
-                  amount: clientShare,
-                  currency: loanCurrency,
-                  description: `Personal interest share (${(distribution.client * 100).toFixed(0)}%) from ${loan.loan_type} loan ${loan.loan_number}`,
-                  transaction_date: paymentDateForDb,
-                  status: 'completed',
-                  branch_id: loan.branch_id,
-                  created_by: req.userId
-                });
-                if (savingsAccounts.length > 0) {
-                  await savingsAccounts[0].update({
-                    balance: parseFloat(savingsAccounts[0].balance || 0) + clientShare
-                  });
-                }
-                personalTxnUnique = true;
-              } else {
-                personalTxnAttempts++;
-              }
-            } catch (personalErr) {
-              console.error('Error creating personal interest transaction:', personalErr);
-              personalTxnAttempts++;
-              if (personalTxnAttempts >= 10) break;
-            }
-          }
-        }
-
-        // General Interest: Share general interest among all clients with savings (matching currency)
-        if (generalShare > 0) {
-          const allSavingsAccounts = await db.SavingsAccount.findAll({
-            where: { status: 'active', currency: loanCurrency },
-            include: [{ model: db.Client, as: 'client', required: true }]
-          });
-
-          if (allSavingsAccounts.length > 0) {
-            const generalInterestSharePerAccount = generalShare / allSavingsAccounts.length;
-
-            for (let i = 0; i < allSavingsAccounts.length; i++) {
-              const account = allSavingsAccounts[i];
-              const accountCurrency = account.currency || 'USD';
-              if (accountCurrency !== loanCurrency) continue;
-
-              let genTxnUnique = false;
-              let genTxnAttempts = 0;
-              while (!genTxnUnique && genTxnAttempts < 10) {
-                try {
-                  const txnCount = await db.Transaction.count({ paranoid: false });
-                  const genTxnNumber = `TXN${String(txnCount + 1 + genTxnAttempts).padStart(8, '0')}`;
-                  const existingTxn = await db.Transaction.findOne({ where: { transaction_number: genTxnNumber }, paranoid: false });
-                  if (!existingTxn) {
-                    await db.Transaction.create({
-                      transaction_number: genTxnNumber,
-                      client_id: account.client_id,
-                      loan_id: loan.id,
-                      savings_account_id: account.id,
-                      type: 'general_interest',
-                      amount: generalInterestSharePerAccount,
-                      currency: loanCurrency,
-                      description: `General interest share (${(distribution.general * 100).toFixed(0)}%) from ${loan.loan_type} loan ${loan.loan_number}`,
-                      transaction_date: paymentDateForDb,
-                      status: 'completed',
-                      branch_id: loan.branch_id,
-                      created_by: req.userId
-                    });
-                    await account.update({
-                      balance: parseFloat(account.balance || 0) + generalInterestSharePerAccount
-                    });
-                    genTxnUnique = true;
-                  } else {
-                    genTxnAttempts++;
-                  }
-                } catch (genErr) {
-                  console.error('Error creating general interest transaction:', genErr);
-                  genTxnAttempts++;
-                  if (genTxnAttempts >= 10) break;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Update loan
-    const newOutstanding = Math.max(0, outstandingBalance - principalAmount);
-    const newTotalPaid = (parseFloat(loan.total_paid || 0) + paymentAmount);
+    // Close loan automatically when total (principal + interest) is fully repaid
+    const isFullyPaid = newOutstanding <= 0.01 || newTotalPaid >= Math.max(0, totalAmountDue - 0.01);
+    const newStatus = isFullyPaid ? 'completed' : loan.status;
 
     await loan.update({
-      outstanding_balance: newOutstanding,
+      outstanding_balance: isFullyPaid ? 0 : newOutstanding,
       total_paid: newTotalPaid,
-      status: newOutstanding <= 0.01 ? 'completed' : loan.status
+      status: newStatus
     });
 
     // Notify client (Notification model requires user_id and type in info|success|warning|error)
     const notifyUserId = loan.client?.user_id;
+    const finalOutstanding = isFullyPaid ? 0 : newOutstanding;
     if (notifyUserId) {
       try {
         await db.Notification.create({
           user_id: notifyUserId,
           title: 'Loan Repayment Received',
-          message: `Your payment of $${paymentAmount.toFixed(2)} for loan ${loan.loan_number} has been received. Outstanding balance: $${newOutstanding.toFixed(2)}.`,
+          message: `Your payment of $${paymentAmount.toFixed(2)} for loan ${loan.loan_number} has been received. Outstanding balance: $${finalOutstanding.toFixed(2)}.`,
           type: 'success',
           is_read: false
         });
@@ -1360,15 +1211,14 @@ router.post('/:id/repay', authenticate, [
       }
     }
 
-    const newStatus = newOutstanding <= 0.01 ? 'completed' : loan.status;
     res.json({
       success: true,
-      message: newOutstanding <= 0.01 ? 'Repayment processed. Loan fully paid and completed.' : 'Repayment processed successfully',
+      message: isFullyPaid ? 'Repayment processed. Loan fully paid and completed.' : 'Repayment processed successfully',
       data: {
         repayment: nextRepayment,
         transaction,
         loan: {
-          outstanding_balance: newOutstanding,
+          outstanding_balance: finalOutstanding,
           total_paid: newTotalPaid,
           status: newStatus
         },
@@ -1381,7 +1231,7 @@ router.post('/:id/repay', authenticate, [
           interest: interestAmount,
           penalty: penaltyAmount,
           date: transaction.transaction_date,
-          outstanding_balance: newOutstanding,
+          outstanding_balance: finalOutstanding,
           payment_method: paymentMethod,
           description: req.body.description || `Loan repayment for ${loan.loan_number}`
         }
