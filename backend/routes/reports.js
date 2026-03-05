@@ -59,6 +59,8 @@ router.get('/clients', async (req, res) => {
     const toDate = to ? new Date(to) : new Date();
     if (isNaN(fromDate.getTime())) fromDate.setTime(0);
     if (isNaN(toDate.getTime())) toDate.setTime(Date.now());
+    fromDate.setUTCHours(0, 0, 0, 0);
+    toDate.setUTCHours(23, 59, 59, 999);
 
     const transactionDateWhere = {
       transaction_date: { [Op.gte]: fromDate, [Op.lte]: toDate },

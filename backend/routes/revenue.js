@@ -7,6 +7,45 @@ const router = express.Router();
 
 router.use(authenticate);
 
+// Admin share of interest (from loanTypes distribution) for backfilling revenue from repayments
+const DEFAULT_ADMIN_INTEREST_SHARE = 0.20;
+
+/**
+ * Get computed loan revenue from LoanRepayment records that don't have a Revenue row
+ * (e.g. repayments made before Revenue tracking or via other flows). Uses admin share of interest.
+ */
+async function getComputedLoanRevenueFromRepayments(whereClause = {}) {
+  const repayments = await db.LoanRepayment.findAll({
+    where: {
+      status: 'completed',
+      interest_amount: { [Op.gt]: 0 },
+      ...whereClause
+    },
+    attributes: ['id', 'interest_amount', 'transaction_id', 'loan_id'],
+    include: [
+      { model: db.Loan, as: 'loan', required: true, attributes: ['id', 'currency'] }
+    ]
+  });
+  const transactionIds = [...new Set(repayments.map(r => r.transaction_id).filter(Boolean))];
+  const existingRevenues = transactionIds.length > 0
+    ? await db.Revenue.findAll({
+        where: { transaction_id: { [Op.in]: transactionIds } },
+        attributes: ['transaction_id']
+      })
+    : [];
+  const existingTxnIds = new Set(existingRevenues.map(r => r.transaction_id));
+  let lrd = 0;
+  let usd = 0;
+  repayments.forEach(r => {
+    if (existingTxnIds.has(r.transaction_id)) return;
+    const share = parseFloat(r.interest_amount || 0) * DEFAULT_ADMIN_INTEREST_SHARE;
+    const currency = (r.loan && r.loan.currency) || 'USD';
+    if (currency === 'LRD') lrd += share;
+    else usd += share;
+  });
+  return { lrd, usd };
+}
+
 // Get all revenue (admin, finance, general_manager, head_micro_loan, supervisor, micro_loan_officer)
 router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loan', 'supervisor', 'micro_loan_officer'), async (req, res) => {
   try {
@@ -34,7 +73,21 @@ router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loa
       order: [['revenue_date', 'DESC']]
     });
 
-    // Calculate currency-separated totals
+    // Add computed revenue from LoanRepayments (for older loans without Revenue records)
+    let computed = { lrd: 0, usd: 0 };
+    try {
+      const repaymentWhere = {};
+      if (startDate && endDate) {
+        repaymentWhere.payment_date = {
+          [Op.between]: [new Date(startDate), new Date(endDate)]
+        };
+      }
+      computed = await getComputedLoanRevenueFromRepayments(repaymentWhere);
+    } catch (e) {
+      console.error('Computed revenue from repayments error:', e);
+    }
+
+    // Calculate currency-separated totals (Revenue table + computed from repayments)
     let totalRevenueLRD = 0;
     let totalRevenueUSD = 0;
     const revenueBySourceLRD = {};
@@ -53,6 +106,10 @@ router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loa
         revenueBySourceUSD[source] = (revenueBySourceUSD[source] || 0) + amount;
       }
     });
+    totalRevenueLRD += computed.lrd;
+    totalRevenueUSD += computed.usd;
+    revenueBySourceLRD['loan_interest'] = (revenueBySourceLRD['loan_interest'] || 0) + computed.lrd;
+    revenueBySourceUSD['loan_interest'] = (revenueBySourceUSD['loan_interest'] || 0) + computed.usd;
 
     // Overall totals (for backward compatibility)
     const totalRevenue = totalRevenueLRD + totalRevenueUSD;
@@ -106,7 +163,21 @@ router.get('/summary', authorize('admin', 'finance', 'general_manager', 'head_mi
     // Get all revenues for currency separation
     const revenues = await db.Revenue.findAll({ where: whereClause });
 
-    // Calculate currency-separated totals
+    // Add computed revenue from LoanRepayments (for older loans without Revenue records)
+    let computed = { lrd: 0, usd: 0 };
+    try {
+      const repaymentWhere = {};
+      if (startDate && endDate) {
+        repaymentWhere.payment_date = {
+          [Op.between]: [new Date(startDate), new Date(endDate)]
+        };
+      }
+      computed = await getComputedLoanRevenueFromRepayments(repaymentWhere);
+    } catch (e) {
+      console.error('Computed revenue from repayments error:', e);
+    }
+
+    // Calculate currency-separated totals (Revenue table + computed)
     let totalRevenueLRD = 0;
     let totalRevenueUSD = 0;
     let loanRevenueLRD = 0;
@@ -147,6 +218,13 @@ router.get('/summary', authorize('admin', 'finance', 'general_manager', 'head_mi
         }
       }
     });
+
+    loanRevenueLRD += computed.lrd;
+    loanRevenueUSD += computed.usd;
+    totalRevenueLRD += computed.lrd;
+    totalRevenueUSD += computed.usd;
+    revenueBySourceLRD['loan_interest'] = (revenueBySourceLRD['loan_interest'] || 0) + computed.lrd;
+    revenueBySourceUSD['loan_interest'] = (revenueBySourceUSD['loan_interest'] || 0) + computed.usd;
 
     // Overall totals (for backward compatibility)
     const totalRevenue = totalRevenueLRD + totalRevenueUSD;

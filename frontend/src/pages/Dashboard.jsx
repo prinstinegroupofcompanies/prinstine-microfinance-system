@@ -44,14 +44,14 @@ const Dashboard = () => {
     fetchRealtimeData();
     fetchHistoricalData();
     
-    const dashboardInterval = setInterval(fetchDashboardData, 30000);
+    const dashboardInterval = setInterval(fetchDashboardData, user?.role === 'borrower' ? 15000 : 30000);
     const realtimeInterval = setInterval(fetchRealtimeData, 10000);
     
     return () => {
       clearInterval(dashboardInterval);
       clearInterval(realtimeInterval);
     };
-  }, []);
+  }, [user?.role]);
 
   const fetchDashboardData = async () => {
     try {
@@ -117,7 +117,9 @@ const Dashboard = () => {
       clientsWithOutstandingDues: 0,
       clientsPaidDues: 0,
       totalFines: 0,
-      outstandingSavings: 0
+      outstandingSavings: 0,
+      personalInterest: 0,
+      generalInterest: 0
     },
     usd: {
       totalSavings: 0,
@@ -131,7 +133,9 @@ const Dashboard = () => {
       clientsWithOutstandingDues: 0,
       clientsPaidDues: 0,
       totalFines: 0,
-      outstandingSavings: 0
+      outstandingSavings: 0,
+      personalInterest: 0,
+      generalInterest: 0
     },
     totalLoans: 0,
     totalOutstandingLoans: 0,

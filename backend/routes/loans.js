@@ -878,6 +878,17 @@ router.get('/:id/schedule', authenticate, async (req, res) => {
       });
     }
 
+    // Borrower can only view their own loan schedule
+    if (req.user?.role === 'borrower') {
+      const client = await getBorrowerClient(req.userId, req.user?.email);
+      if (!client || loan.client_id !== client.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    }
+
     // Parse repayment_schedule if it's a string
     let schedule = [];
     try {
@@ -932,6 +943,7 @@ router.get('/:id/schedule', authenticate, async (req, res) => {
         loan: {
           loan_number: loan.loan_number,
           amount: loan.amount,
+          outstanding_balance: loan.outstanding_balance,
           interest_rate: loan.interest_rate,
           term_months: loan.term_months,
           interest_method: loan.interest_method,

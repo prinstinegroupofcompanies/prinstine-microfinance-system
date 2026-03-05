@@ -150,7 +150,7 @@ router.get('/', authenticate, async (req, res) => {
           const amount = parseFloat(loan.amount || 0);
           const outstanding = parseFloat(loan.outstanding_balance || 0);
           
-          if (loan.status === 'active' || loan.status === 'disbursed') {
+          if (loan.status === 'active' || loan.status === 'disbursed' || loan.status === 'overdue') {
             if (currency === 'LRD') {
               totalLoansLRD += amount;
               outstandingLoansLRD += outstanding;
@@ -159,13 +159,6 @@ router.get('/', authenticate, async (req, res) => {
               totalLoansUSD += amount;
               outstandingLoansUSD += outstanding;
               portfolioValueUSD += outstanding;
-            }
-          }
-          if (loan.status === 'overdue') {
-            if (currency === 'LRD') {
-              // Count overdue loans
-            } else {
-              // Count overdue loans
             }
           }
         });
