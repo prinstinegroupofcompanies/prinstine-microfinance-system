@@ -34,10 +34,10 @@ router.get('/', authenticate, async (req, res) => {
     const branchId = req.user?.branch_id || null;
     const userRole = req.user?.role || 'user';
 
-    // For borrower role, get their client_id and filter by it
+    // For borrower role, get their client_id (by user_id or email fallback)
     let clientId = null;
     if (userRole === 'borrower') {
-      const client = await db.Client.findOne({ where: { user_id: req.userId } });
+      const client = await getBorrowerClient(req.userId, req.user?.email);
       if (client) {
         clientId = client.id;
       }
@@ -676,9 +676,8 @@ router.post('/', authenticate, [
   }
 });
 
-// Approve loan
-// Only supervisor, head_micro_loan, or admin can approve loans (not micro_loan_officer)
-router.post('/:id/approve', authenticate, authorize('admin', 'head_micro_loan', 'supervisor'), async (req, res) => {
+// Approve loan – admin, head_micro_loan, supervisor, or micro_loan_officer
+router.post('/:id/approve', authenticate, authorize('admin', 'head_micro_loan', 'supervisor', 'micro_loan_officer'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {
@@ -704,8 +703,8 @@ router.post('/:id/approve', authenticate, authorize('admin', 'head_micro_loan', 
   }
 });
 
-// Reject loan (cancel pending)
-router.post('/:id/reject', authenticate, authorize('admin', 'head_micro_loan', 'supervisor'), async (req, res) => {
+// Reject loan (cancel pending) – admin, head_micro_loan, supervisor, or micro_loan_officer
+router.post('/:id/reject', authenticate, authorize('admin', 'head_micro_loan', 'supervisor', 'micro_loan_officer'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {
@@ -1011,7 +1010,7 @@ router.post('/:id/repay', authenticate, [
       });
     }
 
-    if (loan.status !== 'active' && loan.status !== 'disbursed') {
+    if (loan.status !== 'active' && loan.status !== 'disbursed' && loan.status !== 'overdue') {
       return res.status(400).json({
         success: false,
         message: 'Loan is not active for repayment'
@@ -1038,8 +1037,8 @@ router.post('/:id/repay', authenticate, [
       });
     }
 
-    // Find next due repayment (pending or partial)
-    const nextRepayment = await db.LoanRepayment.findOne({
+    // Find next due repayment (pending or partial), or allow repayment without schedule (ad-hoc)
+    let nextRepayment = await db.LoanRepayment.findOne({
       where: {
         loan_id: loan.id,
         status: { [Op.in]: ['pending', 'partial'] }
@@ -1047,42 +1046,41 @@ router.post('/:id/repay', authenticate, [
       order: [['due_date', 'ASC'], ['installment_number', 'ASC']]
     });
 
-    if (!nextRepayment) {
-      return res.status(400).json({
-        success: false,
-        message: 'No pending repayments found'
-      });
-    }
+    let interestAmount = 0;
+    let principalAmount = paymentAmount;
+    let penaltyAmount = 0;
 
-    // Calculate payment breakdown
-    const interestAmount = Math.min(paymentAmount, parseFloat(nextRepayment.interest_amount || 0));
-    const principalAmount = paymentAmount - interestAmount;
-    const penaltyAmount = 0; // Can be calculated based on overdue days
+    if (nextRepayment) {
+      // Apply to schedule: use schedule interest/principal split
+      interestAmount = Math.min(paymentAmount, parseFloat(nextRepayment.interest_amount || 0));
+      principalAmount = paymentAmount - interestAmount;
+      penaltyAmount = 0;
 
-    // Update repayment
-    const remainingAmount = parseFloat(nextRepayment.amount) - paymentAmount;
-    if (remainingAmount <= 0.01) {
-      await nextRepayment.update({
-        amount: paymentAmount,
-        principal_amount: principalAmount,
-        interest_amount: interestAmount,
-        penalty_amount: penaltyAmount,
-        payment_date: req.body.payment_date || new Date().toISOString().split('T')[0],
-        payment_method: req.body.payment_method || 'cash',
-        status: 'completed',
-        transaction_id: null // Will be set after transaction creation
-      });
-    } else {
-      await nextRepayment.update({
-        amount: paymentAmount,
-        principal_amount: principalAmount,
-        interest_amount: interestAmount,
-        penalty_amount: penaltyAmount,
-        payment_date: req.body.payment_date || new Date().toISOString().split('T')[0],
-        payment_method: req.body.payment_method || 'cash',
-        status: 'partial'
-      });
+      const remainingAmount = parseFloat(nextRepayment.amount) - paymentAmount;
+      if (remainingAmount <= 0.01) {
+        await nextRepayment.update({
+          amount: paymentAmount,
+          principal_amount: principalAmount,
+          interest_amount: interestAmount,
+          penalty_amount: penaltyAmount,
+          payment_date: req.body.payment_date || new Date().toISOString().split('T')[0],
+          payment_method: req.body.payment_method || 'cash',
+          status: 'completed',
+          transaction_id: null
+        });
+      } else {
+        await nextRepayment.update({
+          amount: paymentAmount,
+          principal_amount: principalAmount,
+          interest_amount: interestAmount,
+          penalty_amount: penaltyAmount,
+          payment_date: req.body.payment_date || new Date().toISOString().split('T')[0],
+          payment_method: req.body.payment_method || 'cash',
+          status: 'partial'
+        });
+      }
     }
+    // If no nextRepayment, we still process payment below (ad-hoc: full amount as principal)
 
     // Create main loan payment transaction
     // Inherit currency from loan
@@ -1105,8 +1103,28 @@ router.post('/:id/repay', authenticate, [
       created_by: req.userId
     });
 
-    // Update repayment with transaction ID
-    await nextRepayment.update({ transaction_id: transaction.id });
+    // Link transaction to repayment: either the schedule row we updated or a new ad-hoc row
+    if (nextRepayment) {
+      await nextRepayment.update({ transaction_id: transaction.id });
+    } else {
+      // No schedule: create one ad-hoc repayment record for this payment
+      const adHocRepaymentNumber = `${loan.loan_number}-ADHOC-${String(Date.now()).slice(-6)}`;
+      nextRepayment = await db.LoanRepayment.create({
+        loan_id: loan.id,
+        repayment_number: adHocRepaymentNumber,
+        installment_number: 0,
+        amount: paymentAmount,
+        principal_amount: principalAmount,
+        interest_amount: interestAmount,
+        penalty_amount: penaltyAmount,
+        payment_date: req.body.payment_date || new Date().toISOString().split('T')[0],
+        payment_method: req.body.payment_method || 'cash',
+        status: 'completed',
+        transaction_id: transaction.id,
+        due_date: req.body.payment_date || new Date().toISOString().split('T')[0],
+        created_by: req.userId
+      });
+    }
 
     // Handle interest distribution: 50% loan owner, 20% company (revenue), 30% users with savings
     if (interestAmount > 0) {
@@ -1327,8 +1345,8 @@ router.post('/:id/repay', authenticate, [
   }
 });
 
-// Update loan – admin or head_micro_loan only; robust parsing and validation
-router.put('/:id', authenticate, authorize('admin', 'head_micro_loan'), async (req, res) => {
+// Update loan – admin, micro_loan_officer, or head_micro_loan can edit/update all loans and loan requests
+router.put('/:id', authenticate, authorize('admin', 'micro_loan_officer', 'head_micro_loan'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {
@@ -1413,8 +1431,8 @@ router.put('/:id', authenticate, authorize('admin', 'head_micro_loan'), async (r
           repayment_number: `${loan.loan_number}-${String(scheduleItem.installment_number).padStart(3, '0')}`,
           installment_number: scheduleItem.installment_number,
           amount: scheduleItem.total_payment,
-          principal_amount: scheduleItem.principal_payment,
-          interest_amount: scheduleItem.interest_payment,
+          principal_amount: scheduleItem.principal_amount ?? scheduleItem.principal_payment,
+          interest_amount: scheduleItem.interest_amount ?? scheduleItem.interest_payment,
           due_date: scheduleItem.due_date,
           payment_date: null,
           status: 'pending',

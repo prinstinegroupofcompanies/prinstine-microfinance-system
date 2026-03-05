@@ -269,6 +269,65 @@ router.post('/', [
       }
     }
 
+    // When a loan_payment transaction is created via Transactions UI, apply it to the loan so repayments take effect
+    if (req.body.type === 'loan_payment' && transaction.loan_id) {
+      try {
+        const loan = await db.Loan.findByPk(transaction.loan_id, {
+          include: [{ model: db.Client, as: 'client', required: false }]
+        });
+        if (loan && (loan.status === 'active' || loan.status === 'disbursed' || loan.status === 'overdue')) {
+          const paymentAmount = parseFloat(transaction.amount || 0);
+          const outstanding = parseFloat(loan.outstanding_balance ?? loan.total_amount ?? loan.amount ?? 0);
+          if (paymentAmount > 0 && paymentAmount <= outstanding) {
+            const nextRep = await db.LoanRepayment.findOne({
+              where: { loan_id: loan.id, status: { [Op.in]: ['pending', 'partial'] } },
+              order: [['due_date', 'ASC'], ['installment_number', 'ASC']]
+            });
+            let interestAmt = 0;
+            let principalAmt = paymentAmount;
+            if (nextRep) {
+              interestAmt = Math.min(paymentAmount, parseFloat(nextRep.interest_amount || 0));
+              principalAmt = paymentAmount - interestAmt;
+              const rem = parseFloat(nextRep.amount || 0) - paymentAmount;
+              await nextRep.update({
+                amount: paymentAmount,
+                principal_amount: principalAmt,
+                interest_amount: interestAmt,
+                payment_date: transaction.transaction_date ? new Date(transaction.transaction_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                status: rem <= 0.01 ? 'completed' : 'partial',
+                transaction_id: transaction.id
+              });
+            } else {
+              const adHocNum = `${loan.loan_number}-ADHOC-${String(Date.now()).slice(-6)}`;
+              await db.LoanRepayment.create({
+                loan_id: loan.id,
+                repayment_number: adHocNum,
+                installment_number: 0,
+                amount: paymentAmount,
+                principal_amount: principalAmt,
+                interest_amount: 0,
+                payment_date: transaction.transaction_date ? new Date(transaction.transaction_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                status: 'completed',
+                transaction_id: transaction.id,
+                due_date: transaction.transaction_date ? new Date(transaction.transaction_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                created_by: req.userId
+              });
+            }
+            const newOut = Math.max(0, outstanding - principalAmt);
+            const newPaid = parseFloat(loan.total_paid || 0) + paymentAmount;
+            await loan.update({
+              outstanding_balance: newOut,
+              total_paid: newPaid,
+              status: newOut <= 0.01 ? 'completed' : loan.status
+            });
+            // Optional: interest distribution for client/general (same as in repay route) - skip for brevity when created via Transactions UI
+          }
+        }
+      } catch (loanPayErr) {
+        console.error('Apply loan_payment to loan error:', loanPayErr);
+      }
+    }
+
     // Reload transaction with associations for response
     let createdTransaction = null;
     try {

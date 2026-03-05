@@ -385,6 +385,7 @@ const RequestLoan = () => {
                       onChange={handleChange}
                       required
                     >
+                      <option value="3">3 Months</option>
                       <option value="6">6 Months</option>
                       <option value="12">12 Months</option>
                       <option value="18">18 Months</option>
@@ -434,7 +435,19 @@ const RequestLoan = () => {
                     </select>
                   </div>
 
-                  {/* Default Charges (Only for Emergency and Micro loans) */}
+                  <div className="col-md-6 mb-3">
+                    <label className="form-label">Interest Method</label>
+                    <select
+                      className="form-select"
+                      name="interest_method"
+                      value={formData.interest_method || 'declining_balance'}
+                      onChange={handleChange}
+                    >
+                      <option value="declining_balance">Declining Balance</option>
+                      <option value="flat">Flat Rate</option>
+                    </select>
+                    <small className="text-muted">How interest is calculated for this loan</small>
+                  </div>
                   {loanTypes[formData.loan_type]?.hasDefaultCharges && (
                     <div className="col-md-6 mb-3">
                       <label className="form-label">Default Charges Percentage (%)</label>
