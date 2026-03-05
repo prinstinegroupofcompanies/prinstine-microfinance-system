@@ -401,9 +401,10 @@ const Dashboard = () => {
                         <tbody>
                           {recentLoans.map((loan) => {
                             const amount = parseFloat(loan.amount || 0);
-                            const outstanding = parseFloat(loan.outstanding_balance ?? loan.amount ?? 0);
+                            const totalAmount = parseFloat(loan.total_amount || loan.amount || 0);
+                            const outstanding = parseFloat(loan.outstanding_balance ?? loan.total_amount ?? loan.amount ?? 0);
                             const totalPaid = parseFloat(loan.total_paid || 0);
-                            const progress = amount > 0 ? Math.min(100, (totalPaid / amount) * 100) : 0;
+                            const progress = totalAmount > 0 ? Math.min(100, (totalPaid / totalAmount) * 100) : 0;
                             const isComplete = loan.status === 'completed' || outstanding <= 0;
                             const sym = loan.currency === 'LRD' ? 'LRD ' : '$';
                             const fmt = (n) => (n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -457,6 +458,70 @@ const Dashboard = () => {
                 </div>
               </div>
             </div>
+
+            {/* Transaction records – dues, loans, savings for borrower */}
+            {recentTransactions && recentTransactions.filter(t => ['loan_payment', 'personal_interest_payment', 'general_interest', 'due_payment', 'deposit', 'withdrawal'].includes(t.type)).length > 0 && (
+              <div className="col-12 mb-4">
+                <div className="card">
+                  <div className="card-header d-flex justify-content-between align-items-center">
+                    <h5 className="mb-0">
+                      <i className="fas fa-receipt me-2"></i>Transaction records
+                    </h5>
+                    <Link to="/transactions" className="btn btn-sm btn-outline-primary">View all</Link>
+                  </div>
+                  <div className="card-body p-0">
+                    <div className="table-responsive">
+                      <table className="table table-hover mb-0">
+                        <thead>
+                          <tr>
+                            <th>Type</th>
+                            <th>Reference</th>
+                            <th>Amount</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {recentTransactions
+                            .filter(t => ['loan_payment', 'personal_interest_payment', 'general_interest', 'due_payment', 'deposit', 'withdrawal'].includes(t.type))
+                            .slice(0, 20)
+                            .map((tx) => {
+                              const typeLabels = {
+                                loan_payment: 'Loan payment',
+                                personal_interest_payment: 'Personal interest',
+                                general_interest: 'General interest',
+                                due_payment: 'Dues payment',
+                                deposit: 'Savings deposit',
+                                withdrawal: 'Savings withdrawal'
+                              };
+                              const typeLabel = typeLabels[tx.type] || tx.type;
+                              const reference = tx.loan?.loan_number || (tx.type === 'due_payment' ? 'Dues' : tx.savingsAccount?.account_number || 'Savings') || '–';
+                              const sym = tx.currency === 'LRD' ? 'LRD ' : '$';
+                              const isCredit = ['deposit', 'personal_interest_payment', 'general_interest'].includes(tx.type);
+                              const isDebit = ['withdrawal', 'loan_payment', 'due_payment'].includes(tx.type);
+                              return (
+                                <tr key={tx.id}>
+                                  <td><span className={`badge ${tx.type === 'due_payment' ? 'bg-warning text-dark' : isCredit ? 'bg-success' : 'bg-info'}`}>{typeLabel}</span></td>
+                                  <td>{reference}</td>
+                                  <td className={isCredit ? 'text-success' : isDebit ? 'text-danger' : ''}>
+                                    {isDebit ? '-' : ''}{sym}{(parseFloat(tx.amount) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </td>
+                                  <td>{tx.transaction_date ? new Date(tx.transaction_date).toLocaleDateString() : '–'}</td>
+                                  <td>
+                                    <span className={`badge bg-${tx.status === 'completed' ? 'success' : tx.status === 'pending' ? 'warning' : 'secondary'}`}>
+                                      {tx.status === 'completed' ? 'Completed' : tx.status || '–'}
+                                    </span>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         ) : (
           <>
@@ -747,7 +812,7 @@ const Dashboard = () => {
                   <div className="card bg-info text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Total Savings (LRD)</h6>
-                      <h3 className="card-title mb-0">LRD {statistics.lrd?.totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">LRD {(statistics.lrd?.totalSavings ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -755,7 +820,7 @@ const Dashboard = () => {
                   <div className="card bg-success text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Total Loans (LRD)</h6>
-                      <h3 className="card-title mb-0">LRD {statistics.lrd?.totalLoans.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">LRD {(statistics.lrd?.totalLoans ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -763,7 +828,7 @@ const Dashboard = () => {
                   <div className="card bg-warning text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Outstanding Loans (LRD)</h6>
-                      <h3 className="card-title mb-0">LRD {statistics.lrd?.outstandingLoans.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">LRD {(statistics.lrd?.outstandingLoans ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -779,7 +844,7 @@ const Dashboard = () => {
                   <div className="card bg-secondary text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Portfolio Value (LRD)</h6>
-                      <h3 className="card-title mb-0">LRD {statistics.lrd?.portfolioValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">LRD {(statistics.lrd?.portfolioValue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -795,7 +860,7 @@ const Dashboard = () => {
                   <div className="card bg-dark text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Total Fines (LRD)</h6>
-                      <h3 className="card-title mb-0">LRD {statistics.lrd?.totalFines.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">LRD {(statistics.lrd?.totalFines ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -832,7 +897,7 @@ const Dashboard = () => {
                   <div className="card bg-success text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Total Loans (USD)</h6>
-                      <h3 className="card-title mb-0">${statistics.usd?.totalLoans.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">${(statistics.usd?.totalLoans ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -840,7 +905,7 @@ const Dashboard = () => {
                   <div className="card bg-warning text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Outstanding Loans (USD)</h6>
-                      <h3 className="card-title mb-0">${statistics.usd?.outstandingLoans.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">${(statistics.usd?.outstandingLoans ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -848,7 +913,7 @@ const Dashboard = () => {
                   <div className="card bg-danger text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Outstanding Dues (USD)</h6>
-                      <h3 className="card-title mb-0">${statistics.usd?.outstandingDues.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">${(statistics.usd?.outstandingDues ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -864,7 +929,7 @@ const Dashboard = () => {
                   <div className="card bg-primary text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Total Collections (USD)</h6>
-                      <h3 className="card-title mb-0">${statistics.usd?.totalCollections.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">${(statistics.usd?.totalCollections ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>
@@ -872,7 +937,7 @@ const Dashboard = () => {
                   <div className="card bg-dark text-white">
                     <div className="card-body">
                       <h6 className="card-subtitle mb-2 text-white-50">Total Fines (USD)</h6>
-                      <h3 className="card-title mb-0">${statistics.usd?.totalFines.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}</h3>
+                      <h3 className="card-title mb-0">${(statistics.usd?.totalFines ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</h3>
                     </div>
                   </div>
                 </div>

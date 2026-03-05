@@ -4,6 +4,7 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { Op } = require('sequelize');
 
 const router = express.Router();
+const sequelize = db.sequelize;
 
 router.use(authenticate);
 router.use(authorize('admin', 'general_manager', 'branch_manager', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance'));
@@ -62,11 +63,15 @@ router.get('/clients', async (req, res) => {
     if (isNaN(fromDate.getTime())) fromDate.setTime(0);
     if (isNaN(toDate.getTime())) toDate.setTime(Date.now());
 
+    // Filter transactions by period: date-only comparison so timezone doesn't shift the day
     const transactionDateWhere = {
       status: 'completed'
     };
     if (fromStr && toStr) {
-      transactionDateWhere.transaction_date = { [Op.gte]: fromDate, [Op.lte]: toDate };
+      const dateCol = sequelize.cast(sequelize.col('transaction_date'), 'DATE');
+      transactionDateWhere[Op.and] = [
+        sequelize.where(dateCol, { [Op.between]: [fromStr, toStr] })
+      ];
     }
 
     const clients = await db.Client.findAll({

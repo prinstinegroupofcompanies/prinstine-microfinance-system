@@ -748,15 +748,24 @@ router.post('/:id/disburse', authenticate, authorize('admin', 'branch_manager', 
       });
     }
 
-    await loan.update({
+    const updatePayload = {
       status: 'disbursed',
       disbursement_date: new Date()
-    });
+    };
+    // Ensure outstanding_balance is set so repayments decrease it correctly
+    const currentOutstanding = parseFloat(loan.outstanding_balance || 0);
+    if (currentOutstanding <= 0) {
+      const totalAmount = parseFloat(loan.total_amount || loan.amount || 0);
+      const principal = parseFloat(loan.amount || 0);
+      updatePayload.outstanding_balance = totalAmount > 0 ? totalAmount : principal;
+    }
+
+    await loan.update(updatePayload);
 
     res.json({
       success: true,
       message: 'Loan disbursed successfully',
-      data: { loan }
+      data: { loan: await db.Loan.findByPk(loan.id) }
     });
   } catch (error) {
     res.status(500).json({
@@ -1020,7 +1029,7 @@ router.post('/:id/repay', authenticate, [
       }
     }
 
-    const outstandingBalance = parseFloat(loan.outstanding_balance || loan.amount);
+    const outstandingBalance = parseFloat(loan.outstanding_balance ?? loan.total_amount ?? loan.amount ?? 0);
 
     if (paymentAmount > outstandingBalance) {
       return res.status(400).json({

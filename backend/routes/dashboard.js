@@ -103,7 +103,7 @@ router.get('/', authenticate, async (req, res) => {
           db.Client.count({ where: clientsWhere }).catch(() => 0),
           db.Loan.findAll({ 
             where: loansWhere,
-            attributes: ['id', 'currency', 'amount', 'outstanding_balance', 'status']
+            attributes: ['id', 'currency', 'amount', 'total_amount', 'outstanding_balance', 'status']
           }).catch(() => []),
           db.SavingsAccount.findAll({ 
             where: { 
@@ -126,6 +126,7 @@ router.get('/', authenticate, async (req, res) => {
               { model: db.Client, as: 'client', required: false, attributes: ['id', 'first_name', 'last_name', 'client_number'] },
               { model: db.Branch, as: 'branch', required: false, attributes: ['id', 'name'] }
             ],
+            attributes: ['id', 'loan_number', 'amount', 'total_amount', 'total_paid', 'outstanding_balance', 'status', 'currency', 'createdAt'],
             order: [['createdAt', 'DESC']],
             limit: userRole === 'borrower' ? 20 : 5
           }).catch(() => []),
@@ -133,10 +134,12 @@ router.get('/', authenticate, async (req, res) => {
             where: transactionsWhere,
             include: [
               { model: db.Client, as: 'client', required: false, attributes: ['id', 'first_name', 'last_name'] },
-              { model: db.Loan, as: 'loan', required: false, attributes: ['id', 'loan_number'] }
+              { model: db.Loan, as: 'loan', required: false, attributes: ['id', 'loan_number'] },
+              { model: db.SavingsAccount, as: 'savingsAccount', required: false, attributes: ['id', 'account_number'] }
             ],
-            order: [['createdAt', 'DESC']],
-            limit: 10
+            attributes: ['id', 'transaction_number', 'type', 'amount', 'currency', 'transaction_date', 'description', 'status', 'createdAt'],
+            order: [['transaction_date', 'DESC'], ['createdAt', 'DESC']],
+            limit: userRole === 'borrower' ? 50 : 10
           }).catch(() => [])
         ]);
 
@@ -148,7 +151,7 @@ router.get('/', authenticate, async (req, res) => {
         allLoans.forEach(loan => {
           const currency = loan.currency || 'USD';
           const amount = parseFloat(loan.amount || 0);
-          const outstanding = parseFloat(loan.outstanding_balance || 0);
+          const outstanding = parseFloat(loan.outstanding_balance ?? loan.total_amount ?? loan.amount ?? 0);
           
           if (loan.status === 'active' || loan.status === 'disbursed' || loan.status === 'overdue') {
             if (currency === 'LRD') {

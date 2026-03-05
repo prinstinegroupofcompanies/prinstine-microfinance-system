@@ -132,8 +132,8 @@ const Reports = () => {
     setClientReportsLoading(true);
     try {
       const params = new URLSearchParams();
-      if (clientReportsFrom) params.set('from', clientReportsFrom);
-      if (clientReportsTo) params.set('to', clientReportsTo);
+      params.set('from', clientReportsFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
+      params.set('to', clientReportsTo || new Date().toISOString().slice(0, 10));
       if (clientReportsCurrency) params.set('currency', clientReportsCurrency);
       if (clientReportsSearch.trim()) params.set('search', clientReportsSearch.trim());
       const res = await apiClient.get(`/api/reports/clients?${params.toString()}`);
@@ -737,7 +737,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Total Savings</h6>
                         <h5 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.totalSavings ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -757,7 +757,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">General Interest</h6>
                         <h5 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.totalGeneralInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.totalGeneralInterest ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -767,7 +767,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Outstanding Dues</h6>
                         <h5 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.outstandingDues.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.outstandingDues ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -777,7 +777,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Monthly Dues</h6>
                         <h5 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.monthlyDues.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.monthlyDues ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -787,7 +787,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Grand Total</h6>
                         <h5 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.grandTotal ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -797,7 +797,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Total Loans</h6>
                         <h5 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.totalLoans.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.totalLoans ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -807,7 +807,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Outstanding Loans</h6>
                         <h5 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.outstandingLoans.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.outstandingLoans ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -817,7 +817,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Outstanding Savings</h6>
                         <h5 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.outstandingSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.outstandingSavings ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -857,7 +857,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Grand Total Savings (LRD)</h6>
                         <h2 className="card-title mb-0">
-                          LRD {financialSummary.lrd?.overallTotalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(financialSummary.lrd?.overallTotalSavings ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h2>
                         <small className="text-white-50">Grand Total - Outstanding Loans</small>
                       </div>
@@ -881,7 +881,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Total Savings</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.totalSavings ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -891,7 +891,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Personal Interest</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.totalPersonalInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.totalPersonalInterest ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -901,7 +901,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">General Interest</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.totalGeneralInterest.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.totalGeneralInterest ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -911,7 +911,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Outstanding Dues</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.outstandingDues.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.outstandingDues ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -921,7 +921,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Monthly Dues</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.monthlyDues.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.monthlyDues ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -931,7 +931,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Grand Total</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.grandTotal ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -941,7 +941,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Total Loans</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.totalLoans.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.totalLoans ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -951,7 +951,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Outstanding Loans</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.outstandingLoans.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.outstandingLoans ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -961,7 +961,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Outstanding Savings</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.outstandingSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.outstandingSavings ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -971,7 +971,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50 small">Total Fines</h6>
                         <h5 className="card-title mb-0">
-                          ${financialSummary.usd?.totalFines.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.totalFines ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h5>
                       </div>
                     </div>
@@ -1001,7 +1001,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Grand Total Savings (USD)</h6>
                         <h2 className="card-title mb-0">
-                          ${financialSummary.usd?.overallTotalSavings.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(financialSummary.usd?.overallTotalSavings ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h2>
                         <small className="text-white-50">Grand Total - Outstanding Loans</small>
                       </div>
@@ -1345,6 +1345,15 @@ const Reports = () => {
             </div>
           </div>
           <div className="card-body">
+            {/* Period and help text */}
+            <div className="mb-3">
+              <span className="text-muted small me-2">
+                <strong>Period:</strong> {clientReportsFrom || '—'} to {clientReportsTo || '—'}
+              </span>
+              <span className="text-muted small d-block mt-1">
+                Loan repayment, personal/general interest, dues paid and penalty are for this period; savings and outstanding loan/dues are current.
+              </span>
+            </div>
             {/* Filters */}
             <div className="row g-3 mb-4">
               <div className="col-md-6 col-lg-2">
@@ -1539,7 +1548,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Total Revenue (LRD)</h6>
                         <h3 className="card-title mb-0">
-                          LRD {revenueData.lrd?.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(revenueData.lrd?.totalRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1549,7 +1558,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Loan Revenue (LRD)</h6>
                         <h3 className="card-title mb-0">
-                          LRD {revenueData.lrd?.loanRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(revenueData.lrd?.loanRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1559,7 +1568,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Savings Revenue (LRD)</h6>
                         <h3 className="card-title mb-0">
-                          LRD {revenueData.lrd?.savingsRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(revenueData.lrd?.savingsRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1569,7 +1578,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Fees Revenue (LRD)</h6>
                         <h3 className="card-title mb-0">
-                          LRD {revenueData.lrd?.feesRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          LRD {(revenueData.lrd?.feesRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1592,7 +1601,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Total Revenue (USD)</h6>
                         <h3 className="card-title mb-0">
-                          ${revenueData.usd?.totalRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(revenueData.usd?.totalRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1602,7 +1611,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Loan Revenue (USD)</h6>
                         <h3 className="card-title mb-0">
-                          ${revenueData.usd?.loanRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(revenueData.usd?.loanRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1612,7 +1621,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Savings Revenue (USD)</h6>
                         <h3 className="card-title mb-0">
-                          ${revenueData.usd?.savingsRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(revenueData.usd?.savingsRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1622,7 +1631,7 @@ const Reports = () => {
                       <div className="card-body text-center">
                         <h6 className="card-subtitle mb-2 text-white-50">Fees Revenue (USD)</h6>
                         <h3 className="card-title mb-0">
-                          ${revenueData.usd?.feesRevenue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                          ${(revenueData.usd?.feesRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1639,7 +1648,7 @@ const Reports = () => {
                 <h5 className="mb-0"><i className="fas fa-list me-2"></i>Revenue Details</h5>
               </div>
               <div className="card-body">
-                {revenueData.revenues.length > 0 ? (
+                {revenueData.revenues?.length > 0 ? (
                   <div className="table-responsive">
                     <table className="table table-hover">
                       <thead>
@@ -1678,14 +1687,14 @@ const Reports = () => {
                         <tr className="table-primary">
                           <th colSpan="2">Total Revenue (LRD)</th>
                           <th>
-                            LRD {revenueData.revenues.filter(r => (r.currency || 'USD') === 'LRD').reduce((sum, r) => sum + parseFloat(r.amount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                            LRD {(revenueData.revenues?.filter(r => (r.currency || 'USD') === 'LRD').reduce((sum, r) => sum + parseFloat(r.amount || 0), 0) ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </th>
                           <th colSpan="4"></th>
                         </tr>
                         <tr className="table-success">
                           <th colSpan="2">Total Revenue (USD)</th>
                           <th>
-                            ${revenueData.revenues.filter(r => (r.currency || 'USD') === 'USD').reduce((sum, r) => sum + parseFloat(r.amount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || '0.00'}
+                            ${(revenueData.revenues?.filter(r => (r.currency || 'USD') === 'USD').reduce((sum, r) => sum + parseFloat(r.amount || 0), 0) ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </th>
                           <th colSpan="4"></th>
                         </tr>
