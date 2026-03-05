@@ -11,8 +11,9 @@ router.use(authenticate);
 const DEFAULT_ADMIN_INTEREST_SHARE = 0.20;
 
 /**
- * Get computed loan revenue from LoanRepayment records that don't have a Revenue row
- * (e.g. repayments made before Revenue tracking or via other flows). Uses admin share of interest.
+ * Get computed loan revenue from LoanRepayment records that don't have a Revenue row.
+ * Uses admin share of interest. Loan include is optional so we don't exclude repayments if loan is missing.
+ * Returns { lrd, usd, countedTransactionIds } so we don't double-count with transaction-based revenue.
  */
 async function getComputedLoanRevenueFromRepayments(whereClause = {}) {
   const repayments = await db.LoanRepayment.findAll({
@@ -23,7 +24,7 @@ async function getComputedLoanRevenueFromRepayments(whereClause = {}) {
     },
     attributes: ['id', 'interest_amount', 'transaction_id', 'loan_id'],
     include: [
-      { model: db.Loan, as: 'loan', required: true, attributes: ['id', 'currency'] }
+      { model: db.Loan, as: 'loan', required: false, attributes: ['id', 'currency'] }
     ]
   });
   const transactionIds = [...new Set(repayments.map(r => r.transaction_id).filter(Boolean))];
@@ -34,14 +35,49 @@ async function getComputedLoanRevenueFromRepayments(whereClause = {}) {
       })
     : [];
   const existingTxnIds = new Set(existingRevenues.map(r => r.transaction_id));
+  const countedTxnIds = new Set();
   let lrd = 0;
   let usd = 0;
   repayments.forEach(r => {
-    if (existingTxnIds.has(r.transaction_id)) return;
+    if (r.transaction_id && existingTxnIds.has(r.transaction_id)) return;
     const share = parseFloat(r.interest_amount || 0) * DEFAULT_ADMIN_INTEREST_SHARE;
     const currency = (r.loan && r.loan.currency) || 'USD';
     if (currency === 'LRD') lrd += share;
     else usd += share;
+    if (r.transaction_id) countedTxnIds.add(r.transaction_id);
+  });
+  return { lrd, usd, countedTransactionIds: countedTxnIds };
+}
+
+/**
+ * Get computed loan revenue from loan_payment Transactions that don't have a Revenue row
+ * and are not already counted via LoanRepayment. Uses 20% of payment amount as estimated interest revenue.
+ */
+async function getComputedRevenueFromLoanPaymentTransactions(whereClause = {}, excludeTransactionIds = new Set()) {
+  const transactions = await db.Transaction.findAll({
+    where: {
+      type: 'loan_payment',
+      status: 'completed',
+      ...whereClause
+    },
+    attributes: ['id', 'amount', 'currency', 'transaction_date']
+  });
+  const txnIds = transactions.map(t => t.id).filter(Boolean);
+  const existingRevenues = txnIds.length > 0
+    ? await db.Revenue.findAll({
+        where: { transaction_id: { [Op.in]: txnIds } },
+        attributes: ['transaction_id']
+      })
+    : [];
+  const existingSet = new Set(existingRevenues.map(r => r.transaction_id));
+  let lrd = 0;
+  let usd = 0;
+  transactions.forEach(t => {
+    if (existingSet.has(t.id) || excludeTransactionIds.has(t.id)) return;
+    const amount = parseFloat(t.amount || 0) * DEFAULT_ADMIN_INTEREST_SHARE;
+    const currency = (t.currency || 'USD');
+    if (currency === 'LRD') lrd += amount;
+    else usd += amount;
   });
   return { lrd, usd };
 }
@@ -73,18 +109,28 @@ router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loa
       order: [['revenue_date', 'DESC']]
     });
 
-    // Add computed revenue from LoanRepayments (for older loans without Revenue records)
+    // Add computed revenue from LoanRepayments and loan_payment Transactions
     let computed = { lrd: 0, usd: 0 };
     try {
       const repaymentWhere = {};
       if (startDate && endDate) {
-        repaymentWhere.payment_date = {
-          [Op.between]: [new Date(startDate), new Date(endDate)]
-        };
+        const fromDateOnly = String(startDate).slice(0, 10);
+        const toDateOnly = String(endDate).slice(0, 10);
+        repaymentWhere.payment_date = { [Op.between]: [fromDateOnly, toDateOnly] };
       }
-      computed = await getComputedLoanRevenueFromRepayments(repaymentWhere);
+      const fromRepayments = await getComputedLoanRevenueFromRepayments(repaymentWhere);
+      computed.lrd += fromRepayments.lrd;
+      computed.usd += fromRepayments.usd;
+      const countedTxnIds = fromRepayments.countedTransactionIds || new Set();
+      const txnWhere = {};
+      if (startDate && endDate) {
+        txnWhere.transaction_date = { [Op.between]: [new Date(startDate), new Date(endDate)] };
+      }
+      const fromTxns = await getComputedRevenueFromLoanPaymentTransactions(txnWhere, countedTxnIds);
+      computed.lrd += fromTxns.lrd;
+      computed.usd += fromTxns.usd;
     } catch (e) {
-      console.error('Computed revenue from repayments error:', e);
+      console.error('Computed revenue error:', e);
     }
 
     // Calculate currency-separated totals (Revenue table + computed from repayments)
@@ -163,18 +209,28 @@ router.get('/summary', authorize('admin', 'finance', 'general_manager', 'head_mi
     // Get all revenues for currency separation
     const revenues = await db.Revenue.findAll({ where: whereClause });
 
-    // Add computed revenue from LoanRepayments (for older loans without Revenue records)
+    // Add computed revenue from LoanRepayments and loan_payment Transactions
     let computed = { lrd: 0, usd: 0 };
     try {
       const repaymentWhere = {};
       if (startDate && endDate) {
-        repaymentWhere.payment_date = {
-          [Op.between]: [new Date(startDate), new Date(endDate)]
-        };
+        const fromDateOnly = String(startDate).slice(0, 10);
+        const toDateOnly = String(endDate).slice(0, 10);
+        repaymentWhere.payment_date = { [Op.between]: [fromDateOnly, toDateOnly] };
       }
-      computed = await getComputedLoanRevenueFromRepayments(repaymentWhere);
+      const fromRepayments = await getComputedLoanRevenueFromRepayments(repaymentWhere);
+      computed.lrd += fromRepayments.lrd;
+      computed.usd += fromRepayments.usd;
+      const countedTxnIds = fromRepayments.countedTransactionIds || new Set();
+      const txnWhere = {};
+      if (startDate && endDate) {
+        txnWhere.transaction_date = { [Op.between]: [new Date(startDate), new Date(endDate)] };
+      }
+      const fromTxns = await getComputedRevenueFromLoanPaymentTransactions(txnWhere, countedTxnIds);
+      computed.lrd += fromTxns.lrd;
+      computed.usd += fromTxns.usd;
     } catch (e) {
-      console.error('Computed revenue from repayments error:', e);
+      console.error('Computed revenue error:', e);
     }
 
     // Calculate currency-separated totals (Revenue table + computed)

@@ -55,17 +55,19 @@ router.get('/clients', async (req, res) => {
       clientWhere[Op.and].push({ id: { [Op.ne]: -1 } });
     }
 
-    const fromDate = from ? new Date(from) : new Date(0);
-    const toDate = to ? new Date(to) : new Date();
+    const fromStr = from && String(from).trim();
+    const toStr = to && String(to).trim();
+    const fromDate = fromStr ? new Date(fromStr + 'T00:00:00') : new Date(0);
+    const toDate = toStr ? new Date(toStr + 'T23:59:59.999') : new Date();
     if (isNaN(fromDate.getTime())) fromDate.setTime(0);
     if (isNaN(toDate.getTime())) toDate.setTime(Date.now());
-    fromDate.setUTCHours(0, 0, 0, 0);
-    toDate.setUTCHours(23, 59, 59, 999);
 
     const transactionDateWhere = {
-      transaction_date: { [Op.gte]: fromDate, [Op.lte]: toDate },
       status: 'completed'
     };
+    if (fromStr && toStr) {
+      transactionDateWhere.transaction_date = { [Op.gte]: fromDate, [Op.lte]: toDate };
+    }
 
     const clients = await db.Client.findAll({
       where: clientWhere,
