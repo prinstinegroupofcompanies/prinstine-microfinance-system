@@ -254,7 +254,8 @@ router.get('/:id/full', authenticate, async (req, res) => {
     const totalDuesOutstanding = Math.abs(Math.min(0, parseFloat(client.total_dues || 0)));
     const totalPenalties = penaltyTransactions.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0) +
       loanRepaymentsWithPenalty.reduce((sum, p) => sum + (p.penalty_amount || 0), 0);
-    const takeHome = totalSavingsBalance + totalInterestReceived - totalDuesOutstanding - totalPenalties;
+    const totalLoanOutstanding = loans.reduce((sum, l) => sum + parseFloat(l.outstanding_balance || 0), 0);
+    const takeHome = totalSavingsBalance + totalInterestReceived - totalDuesOutstanding - totalPenalties - totalLoanOutstanding;
 
     const loansWithSchedules = loans.map(loan => {
       const loanData = loan.toJSON();
@@ -306,6 +307,7 @@ router.get('/:id/full', authenticate, async (req, res) => {
           totalInterestReceived,
           totalDuesOutstanding,
           totalPenalties,
+          totalLoanOutstanding,
           takeHome,
           currency: client.dues_currency || 'USD'
         }

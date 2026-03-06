@@ -56,21 +56,29 @@ router.get('/clients', async (req, res) => {
       clientWhere[Op.and].push({ id: { [Op.ne]: -1 } });
     }
 
-    const fromStr = from && String(from).trim();
-    const toStr = to && String(to).trim();
-    const fromDate = fromStr ? new Date(fromStr + 'T00:00:00') : new Date(0);
-    const toDate = toStr ? new Date(toStr + 'T23:59:59.999') : new Date();
-    if (isNaN(fromDate.getTime())) fromDate.setTime(0);
-    if (isNaN(toDate.getTime())) toDate.setTime(Date.now());
+    const fromStr = from && String(from).trim().match(/^\d{4}-\d{2}-\d{2}/) ? String(from).trim().slice(0, 10) : null;
+    const toStr = to && String(to).trim().match(/^\d{4}-\d{2}-\d{2}/) ? String(to).trim().slice(0, 10) : null;
+    let fromDate = fromStr ? new Date(fromStr + 'T00:00:00') : new Date(0);
+    let toDate = toStr ? new Date(toStr + 'T23:59:59.999') : new Date();
+    if (isNaN(fromDate.getTime())) fromDate = new Date(0);
+    if (isNaN(toDate.getTime())) toDate = new Date();
+    if (fromDate > toDate && fromStr && toStr) {
+      const swap = fromDate;
+      fromDate = toDate;
+      toDate = swap;
+    }
+    const fromNorm = fromDate.toISOString().slice(0, 10);
+    const toNorm = toDate.toISOString().slice(0, 10);
 
-    // Filter transactions by period: date-only comparison so timezone doesn't shift the day
+    // Filter transactions by period: use date-only comparison for real-time data
     const transactionDateWhere = {
       status: 'completed'
     };
     if (fromStr && toStr) {
       const dateCol = sequelize.cast(sequelize.col('transaction_date'), 'DATE');
       transactionDateWhere[Op.and] = [
-        sequelize.where(dateCol, { [Op.between]: [fromStr, toStr] })
+        sequelize.where(dateCol, { [Op.gte]: fromNorm }),
+        sequelize.where(dateCol, { [Op.lte]: toNorm })
       ];
     }
 
@@ -101,7 +109,8 @@ router.get('/clients', async (req, res) => {
           client_id: { [Op.in]: clientIds },
           ...transactionDateWhere
         },
-        attributes: ['client_id', 'type', 'currency', 'amount'],
+        attributes: ['client_id', 'type', 'currency', 'amount', 'transaction_date'],
+        order: [['transaction_date', 'ASC']],
         paranoid: false
       })
     ]);
@@ -181,12 +190,21 @@ router.get('/clients', async (req, res) => {
 
       const name = [client.first_name, client.last_name].filter(Boolean).join(' ') || '-';
 
+      // Per-client transactions in period (with date) for display in report
+      const transactionsInPeriod = (txList || []).map(t => ({
+        transaction_date: t.transaction_date,
+        type: t.type,
+        amount: parseFloat(t.amount || 0),
+        currency: t.currency || 'USD'
+      }));
+
       if (currency === 'LRD') {
         return {
           id: client.id,
           client_number: client.client_number,
           savings_id: savingsIds,
           name,
+          transactions: transactionsInPeriod,
           total_savings: totalSavings.lrd,
           personal_interest: personalInterest.lrd,
           general_interest: generalInterest.lrd,
@@ -204,6 +222,7 @@ router.get('/clients', async (req, res) => {
           client_number: client.client_number,
           savings_id: savingsIds,
           name,
+          transactions: transactionsInPeriod,
           total_savings: totalSavings.usd,
           personal_interest: personalInterest.usd,
           general_interest: generalInterest.usd,
@@ -220,6 +239,7 @@ router.get('/clients', async (req, res) => {
         client_number: client.client_number,
         savings_id: savingsIds,
         name,
+        transactions: transactionsInPeriod,
         total_savings_lrd: totalSavings.lrd,
         total_savings_usd: totalSavings.usd,
         personal_interest_lrd: personalInterest.lrd,
@@ -245,8 +265,8 @@ router.get('/clients', async (req, res) => {
       data: {
         clients: clientsData,
         currency: currency || 'ALL',
-        from: fromDate.toISOString(),
-        to: toDate.toISOString()
+        from: fromNorm,
+        to: toNorm
       }
     });
   } catch (error) {

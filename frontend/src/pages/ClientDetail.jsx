@@ -398,7 +398,24 @@ const ClientDetail = () => {
             </div>
             <div className="card-body">
               {loans.length > 0 ? (
-                <div className="table-responsive">
+                <>
+                  <div className="mb-3 p-2 bg-light rounded">
+                    <strong>Total Loan Outstanding:</strong>{' '}
+                    <span className="text-danger">
+                      {(() => {
+                        const byCur = { LRD: 0, USD: 0 };
+                        loans.forEach(l => {
+                          const c = (l.currency || 'USD');
+                          byCur[c] = (byCur[c] || 0) + parseFloat(l.outstanding_balance || 0);
+                        });
+                        return [
+                          byCur.LRD > 0 && `LRD ${byCur.LRD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                          byCur.USD > 0 && `$${byCur.USD.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        ].filter(Boolean).join(' · ') || '0.00';
+                      })()}
+                    </span>
+                  </div>
+                  <div className="table-responsive">
                   <table className="table table-hover">
                     <thead>
                       <tr>
@@ -422,11 +439,11 @@ const ClientDetail = () => {
                               {loan.loan_type ? loan.loan_type.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase()) : 'Personal'}
                             </span>
                           </td>
-                          <td>${parseFloat(loan.amount || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td>{formatCur(loan.amount, loan.currency)}</td>
                           <td>{loan.interest_rate || 0}%</td>
                           <td>{loan.term_months || 0} months</td>
-                          <td><strong className="text-danger">${parseFloat(loan.outstanding_balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong></td>
-                          <td className="text-success">${parseFloat(loan.total_paid || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                          <td><strong className="text-danger">{formatCur(loan.outstanding_balance, loan.currency)}</strong></td>
+                          <td className="text-success">{formatCur(loan.total_paid, loan.currency)}</td>
                           <td>
                             <span className={`badge bg-${
                               loan.status === 'active' ? 'success' : 
@@ -449,12 +466,63 @@ const ClientDetail = () => {
                     </tbody>
                   </table>
                 </div>
+                </>
               ) : (
                 <p className="text-muted text-center py-3">No loans found</p>
               )}
             </div>
           </div>
         </div>
+
+        {/* Loan Records (Repayments) - when not using full record, build from clients/:id/loans repayments */}
+        {!fullRecord && (() => {
+          const loanRecordsFromLoans = loans.flatMap(l => (l.repayments || []).map(r => ({
+            ...(typeof r.toJSON === 'function' ? r.toJSON() : r),
+            loan_number: l.loan_number,
+            currency: l.currency || 'USD'
+          })));
+          return loanRecordsFromLoans.length > 0 ? (
+            <div className="col-12 mb-4">
+              <div className="card">
+                <div className="card-header bg-primary text-white">
+                  <h5 className="mb-0"><i className="fas fa-file-invoice-dollar me-2"></i>Loan Records (Repayments)</h5>
+                </div>
+                <div className="card-body">
+                  <div className="table-responsive">
+                    <table className="table table-hover table-sm">
+                      <thead>
+                        <tr>
+                          <th>Loan</th>
+                          <th>Installment</th>
+                          <th>Due Date</th>
+                          <th>Payment Date</th>
+                          <th>Principal</th>
+                          <th>Interest</th>
+                          <th>Penalty</th>
+                          <th>Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {loanRecordsFromLoans.slice(0, 150).map((r, idx) => (
+                          <tr key={r.id || idx}>
+                            <td><strong>{r.loan_number}</strong></td>
+                            <td>{r.installment_number}</td>
+                            <td>{r.due_date ? new Date(r.due_date).toLocaleDateString() : '-'}</td>
+                            <td>{r.payment_date ? new Date(r.payment_date).toLocaleDateString() : '-'}</td>
+                            <td>{formatCur(r.principal_amount, r.currency)}</td>
+                            <td>{formatCur(r.interest_amount, r.currency)}</td>
+                            <td>{formatCur(r.penalty_amount, r.currency)}</td>
+                            <td><span className={`badge bg-${r.status === 'completed' ? 'success' : 'warning'}`}>{r.status || 'pending'}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null;
+        })()}
 
         {/* Savings Accounts */}
         <div className="col-12 mb-4">
@@ -544,9 +612,15 @@ const ClientDetail = () => {
                           <strong className="text-danger">{formatCur(summary.totalPenalties, summary.currency)}</strong>
                         </div>
                       </div>
+                      <div className="col-md-3">
+                        <div className="p-3 bg-light rounded">
+                          <small className="text-muted d-block">Total Loan Outstanding</small>
+                          <strong className="text-danger">{formatCur(summary.totalLoanOutstanding, summary.currency)}</strong>
+                        </div>
+                      </div>
                       <div className="col-12">
                         <div className="p-3 bg-primary bg-opacity-10 rounded border border-primary">
-                          <small className="text-muted d-block">Total Take Home</small>
+                          <small className="text-muted d-block">Total Take Home (after savings, interest, dues, penalties, loan outstanding)</small>
                           <h4 className="mb-0 text-primary">{formatCur(summary.takeHome, summary.currency)}</h4>
                         </div>
                       </div>

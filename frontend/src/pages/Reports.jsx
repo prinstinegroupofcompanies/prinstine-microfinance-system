@@ -139,17 +139,25 @@ const Reports = () => {
   });
   const [clientReportsTo, setClientReportsTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [clientReportsSearch, setClientReportsSearch] = useState('');
+  const [clientReportsExpandedId, setClientReportsExpandedId] = useState(null);
 
   const fetchClientReports = useCallback(async () => {
+    const from = clientReportsFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const to = clientReportsTo || new Date().toISOString().slice(0, 10);
+    if (from > to) {
+      toast.error('"From" date must be before or equal to "To" date.');
+      return;
+    }
     setClientReportsLoading(true);
     try {
       const params = new URLSearchParams();
-      params.set('from', clientReportsFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10));
-      params.set('to', clientReportsTo || new Date().toISOString().slice(0, 10));
+      params.set('from', from);
+      params.set('to', to);
       if (clientReportsCurrency) params.set('currency', clientReportsCurrency);
       if (clientReportsSearch.trim()) params.set('search', clientReportsSearch.trim());
       const res = await apiClient.get(`/api/reports/clients?${params.toString()}`);
       setClientReportsList(res.data?.data?.clients ?? []);
+      setClientReportsExpandedId(null);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to load client reports');
       setClientReportsList([]);
@@ -1498,49 +1506,91 @@ const Reports = () => {
                       </tr>
                     ) : (
                       clientReportsList.map((row) => (
-                        <tr key={row.id}>
-                          <td>{row.client_number ?? row.id}</td>
-                          <td>{row.savings_id ?? '-'}</td>
-                          <td>{row.name ?? '-'}</td>
-                          {clientReportsCurrency === 'ALL' ? (
-                            <>
-                              <td className="text-end">{formatCurrency(row.total_savings_lrd, 'LRD')}</td>
-                              <td className="text-end">{formatCurrency(row.total_savings_usd, 'USD')}</td>
-                              <td className="text-end">{formatCurrency(row.personal_interest_lrd, 'LRD')}</td>
-                              <td className="text-end">{formatCurrency(row.personal_interest_usd, 'USD')}</td>
-                              <td className="text-end">{formatCurrency(row.general_interest_lrd, 'LRD')}</td>
-                              <td className="text-end">{formatCurrency(row.general_interest_usd, 'USD')}</td>
-                              <td className="text-end">{formatCurrency(row.outstanding_loan_lrd, 'LRD')}</td>
-                              <td className="text-end">{formatCurrency(row.outstanding_loan_usd, 'USD')}</td>
-                              <td className="text-end">{formatCurrency(row.loan_repayment_done_lrd, 'LRD')}</td>
-                              <td className="text-end">{formatCurrency(row.loan_repayment_done_usd, 'USD')}</td>
-                              <td><span className="badge bg-secondary">{row.loan_status ?? '-'}</span></td>
-                              <td className="text-end">{formatCurrency(row.outstanding_dues_lrd, 'LRD')}</td>
-                              <td className="text-end">{formatCurrency(row.outstanding_dues_usd, 'USD')}</td>
-                              <td className="text-end">{formatCurrency(row.total_dues_paid_lrd, 'LRD')}</td>
-                              <td className="text-end">{formatCurrency(row.total_dues_paid_usd, 'USD')}</td>
-                              <td className="text-end">{formatCurrency(row.penalty_lrd, 'LRD')}</td>
-                              <td className="text-end">{formatCurrency(row.penalty_usd, 'USD')}</td>
-                            </>
-                          ) : (
-                            <>
-                              <td className="text-end">{formatCurrency(row.total_savings, clientReportsCurrency)}</td>
-                              <td className="text-end">{formatCurrency(row.personal_interest, clientReportsCurrency)}</td>
-                              <td className="text-end">{formatCurrency(row.general_interest, clientReportsCurrency)}</td>
-                              <td className="text-end">{formatCurrency(row.outstanding_loan, clientReportsCurrency)}</td>
-                              <td className="text-end">{formatCurrency(row.loan_repayment_done, clientReportsCurrency)}</td>
-                              <td><span className="badge bg-secondary">{row.loan_status ?? '-'}</span></td>
-                              <td className="text-end">{formatCurrency(row.outstanding_dues, clientReportsCurrency)}</td>
-                              <td className="text-end">{formatCurrency(row.total_dues_paid, clientReportsCurrency)}</td>
-                              <td className="text-end">{formatCurrency(row.penalty, clientReportsCurrency)}</td>
-                            </>
+                        <React.Fragment key={row.id}>
+                          <tr>
+                            <td>{row.client_number ?? row.id}</td>
+                            <td>{row.savings_id ?? '-'}</td>
+                            <td>{row.name ?? '-'}</td>
+                            {clientReportsCurrency === 'ALL' ? (
+                              <>
+                                <td className="text-end">{formatCurrency(row.total_savings_lrd, 'LRD')}</td>
+                                <td className="text-end">{formatCurrency(row.total_savings_usd, 'USD')}</td>
+                                <td className="text-end">{formatCurrency(row.personal_interest_lrd, 'LRD')}</td>
+                                <td className="text-end">{formatCurrency(row.personal_interest_usd, 'USD')}</td>
+                                <td className="text-end">{formatCurrency(row.general_interest_lrd, 'LRD')}</td>
+                                <td className="text-end">{formatCurrency(row.general_interest_usd, 'USD')}</td>
+                                <td className="text-end">{formatCurrency(row.outstanding_loan_lrd, 'LRD')}</td>
+                                <td className="text-end">{formatCurrency(row.outstanding_loan_usd, 'USD')}</td>
+                                <td className="text-end">{formatCurrency(row.loan_repayment_done_lrd, 'LRD')}</td>
+                                <td className="text-end">{formatCurrency(row.loan_repayment_done_usd, 'USD')}</td>
+                                <td><span className="badge bg-secondary">{row.loan_status ?? '-'}</span></td>
+                                <td className="text-end">{formatCurrency(row.outstanding_dues_lrd, 'LRD')}</td>
+                                <td className="text-end">{formatCurrency(row.outstanding_dues_usd, 'USD')}</td>
+                                <td className="text-end">{formatCurrency(row.total_dues_paid_lrd, 'LRD')}</td>
+                                <td className="text-end">{formatCurrency(row.total_dues_paid_usd, 'USD')}</td>
+                                <td className="text-end">{formatCurrency(row.penalty_lrd, 'LRD')}</td>
+                                <td className="text-end">{formatCurrency(row.penalty_usd, 'USD')}</td>
+                              </>
+                            ) : (
+                              <>
+                                <td className="text-end">{formatCurrency(row.total_savings, clientReportsCurrency)}</td>
+                                <td className="text-end">{formatCurrency(row.personal_interest, clientReportsCurrency)}</td>
+                                <td className="text-end">{formatCurrency(row.general_interest, clientReportsCurrency)}</td>
+                                <td className="text-end">{formatCurrency(row.outstanding_loan, clientReportsCurrency)}</td>
+                                <td className="text-end">{formatCurrency(row.loan_repayment_done, clientReportsCurrency)}</td>
+                                <td><span className="badge bg-secondary">{row.loan_status ?? '-'}</span></td>
+                                <td className="text-end">{formatCurrency(row.outstanding_dues, clientReportsCurrency)}</td>
+                                <td className="text-end">{formatCurrency(row.total_dues_paid, clientReportsCurrency)}</td>
+                                <td className="text-end">{formatCurrency(row.penalty, clientReportsCurrency)}</td>
+                              </>
+                            )}
+                            <td className="text-center">
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-secondary me-1"
+                                title={clientReportsExpandedId === row.id ? 'Hide transactions' : 'Show transactions in period'}
+                                onClick={() => setClientReportsExpandedId(prev => prev === row.id ? null : row.id)}
+                              >
+                                <i className={`fas fa-${(row.transactions && row.transactions.length) ? (clientReportsExpandedId === row.id ? 'chevron-up' : 'chevron-down') : 'minus'} me-1`}></i>
+                                {row.transactions && row.transactions.length ? `${row.transactions.length} txns` : '0'}
+                              </button>
+                              <Link to={`/clients/${row.id}`} className="btn btn-sm btn-outline-primary" title="View client details">
+                                <i className="fas fa-user me-1"></i>View
+                              </Link>
+                            </td>
+                          </tr>
+                          {clientReportsExpandedId === row.id && row.transactions && row.transactions.length > 0 && (
+                            <tr>
+                              <td colSpan={clientReportsCurrency === 'ALL' ? 22 : 13} className="bg-light p-3">
+                                <div className="small">
+                                  <strong>Transactions in period (From–To) — each with date:</strong>
+                                  <div className="table-responsive mt-2">
+                                    <table className="table table-sm table-bordered mb-0">
+                                      <thead className="table-light">
+                                        <tr>
+                                          <th>Date</th>
+                                          <th>Type</th>
+                                          <th className="text-end">Amount</th>
+                                          <th>Currency</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {row.transactions.map((t, idx) => (
+                                          <tr key={idx}>
+                                            <td>{t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '—'}</td>
+                                            <td><span className="badge bg-secondary">{t.type || '—'}</span></td>
+                                            <td className="text-end">{formatCurrency(t.amount, t.currency)}</td>
+                                            <td>{t.currency || 'USD'}</td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
                           )}
-                          <td className="text-center">
-                            <Link to={`/clients/${row.id}`} className="btn btn-sm btn-outline-primary" title="View client details">
-                              <i className="fas fa-user me-1"></i>View
-                            </Link>
-                          </td>
-                        </tr>
+                        </React.Fragment>
                       ))
                     )}
                   </tbody>
