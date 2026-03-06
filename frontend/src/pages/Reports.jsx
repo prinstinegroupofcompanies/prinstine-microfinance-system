@@ -97,6 +97,10 @@ const Reports = () => {
     loanRevenue: 0,
     savingsRevenue: 0,
     feesRevenue: 0,
+    microfinanceRevenue: 0,
+    duesRevenue: 0,
+    generalInterestRevenue: 0,
+    penaltyRevenue: 0,
     revenueBySource: {},
     revenues: [],
     // Currency-separated data
@@ -105,6 +109,10 @@ const Reports = () => {
       loanRevenue: 0,
       savingsRevenue: 0,
       feesRevenue: 0,
+      microfinanceRevenue: 0,
+      duesRevenue: 0,
+      generalInterestRevenue: 0,
+      penaltyRevenue: 0,
       revenueBySource: {}
     },
     usd: {
@@ -112,6 +120,10 @@ const Reports = () => {
       loanRevenue: 0,
       savingsRevenue: 0,
       feesRevenue: 0,
+      microfinanceRevenue: 0,
+      duesRevenue: 0,
+      generalInterestRevenue: 0,
+      penaltyRevenue: 0,
       revenueBySource: {}
     }
   });
@@ -418,6 +430,10 @@ const Reports = () => {
           loanRevenue: response.data.data.loanRevenue || 0,
           savingsRevenue: response.data.data.savingsRevenue || 0,
           feesRevenue: response.data.data.feesRevenue || 0,
+          microfinanceRevenue: response.data.data.microfinanceRevenue ?? response.data.data.loanRevenue ?? 0,
+          duesRevenue: response.data.data.duesRevenue || 0,
+          generalInterestRevenue: response.data.data.generalInterestRevenue || 0,
+          penaltyRevenue: response.data.data.penaltyRevenue || 0,
           revenueBySource: response.data.data.revenueBySource || {},
           revenues: prev.revenues || [],
           // Currency-separated data
@@ -426,6 +442,10 @@ const Reports = () => {
             loanRevenue: 0,
             savingsRevenue: 0,
             feesRevenue: 0,
+            microfinanceRevenue: 0,
+            duesRevenue: 0,
+            generalInterestRevenue: 0,
+            penaltyRevenue: 0,
             revenueBySource: {}
           },
           usd: response.data.data.usd || {
@@ -433,6 +453,10 @@ const Reports = () => {
             loanRevenue: 0,
             savingsRevenue: 0,
             feesRevenue: 0,
+            microfinanceRevenue: 0,
+            duesRevenue: 0,
+            generalInterestRevenue: 0,
+            penaltyRevenue: 0,
             revenueBySource: {}
           }
         }));
@@ -1556,9 +1580,9 @@ const Reports = () => {
                   <div className="col-md-3">
                     <div className="card bg-success text-white">
                       <div className="card-body text-center">
-                        <h6 className="card-subtitle mb-2 text-white-50">Loan Revenue (LRD)</h6>
+                        <h6 className="card-subtitle mb-2 text-white-50">Microfinance Loan Interest (100%)</h6>
                         <h3 className="card-title mb-0">
-                          LRD {(revenueData.lrd?.loanRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          LRD {(revenueData.lrd?.microfinanceRevenue ?? revenueData.lrd?.loanRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1566,9 +1590,9 @@ const Reports = () => {
                   <div className="col-md-3">
                     <div className="card bg-info text-white">
                       <div className="card-body text-center">
-                        <h6 className="card-subtitle mb-2 text-white-50">Savings Revenue (LRD)</h6>
+                        <h6 className="card-subtitle mb-2 text-white-50">Dues (45%)</h6>
                         <h3 className="card-title mb-0">
-                          LRD {(revenueData.lrd?.savingsRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          LRD {(revenueData.lrd?.duesRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1576,9 +1600,19 @@ const Reports = () => {
                   <div className="col-md-3">
                     <div className="card bg-warning text-white">
                       <div className="card-body text-center">
-                        <h6 className="card-subtitle mb-2 text-white-50">Fees Revenue (LRD)</h6>
+                        <h6 className="card-subtitle mb-2 text-white-50">General Interest (30%)</h6>
                         <h3 className="card-title mb-0">
-                          LRD {(revenueData.lrd?.feesRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          LRD {(revenueData.lrd?.generalInterestRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </h3>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-md-3">
+                    <div className="card bg-secondary text-white">
+                      <div className="card-body text-center">
+                        <h6 className="card-subtitle mb-2 text-white-50">Fines/Penalty (50%)</h6>
+                        <h3 className="card-title mb-0">
+                          LRD {(revenueData.lrd?.penaltyRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1609,9 +1643,9 @@ const Reports = () => {
                   <div className="col-md-3">
                     <div className="card bg-success text-white">
                       <div className="card-body text-center">
-                        <h6 className="card-subtitle mb-2 text-white-50">Loan Revenue (USD)</h6>
+                        <h6 className="card-subtitle mb-2 text-white-50">Microfinance Loan Interest (100%)</h6>
                         <h3 className="card-title mb-0">
-                          ${(revenueData.usd?.loanRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ${(revenueData.usd?.microfinanceRevenue ?? revenueData.usd?.loanRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1619,9 +1653,9 @@ const Reports = () => {
                   <div className="col-md-3">
                     <div className="card bg-info text-white">
                       <div className="card-body text-center">
-                        <h6 className="card-subtitle mb-2 text-white-50">Savings Revenue (USD)</h6>
+                        <h6 className="card-subtitle mb-2 text-white-50">Dues (45%)</h6>
                         <h3 className="card-title mb-0">
-                          ${(revenueData.usd?.savingsRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ${(revenueData.usd?.duesRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>
@@ -1629,9 +1663,19 @@ const Reports = () => {
                   <div className="col-md-3">
                     <div className="card bg-warning text-white">
                       <div className="card-body text-center">
-                        <h6 className="card-subtitle mb-2 text-white-50">Fees Revenue (USD)</h6>
+                        <h6 className="card-subtitle mb-2 text-white-50">General Interest (30%)</h6>
                         <h3 className="card-title mb-0">
-                          ${(revenueData.usd?.feesRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ${(revenueData.usd?.generalInterestRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </h3>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="col-md-3">
+                    <div className="card bg-secondary text-white">
+                      <div className="card-body text-center">
+                        <h6 className="card-subtitle mb-2 text-white-50">Fines/Penalty (50%)</h6>
+                        <h3 className="card-title mb-0">
+                          ${(revenueData.usd?.penaltyRevenue ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </h3>
                       </div>
                     </div>

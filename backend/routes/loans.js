@@ -4,6 +4,7 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { Op } = require('sequelize');
 const { getBorrowerClient } = require('../helpers/borrower');
+const { createRevenue, clientHasSavings, REVENUE_SOURCES } = require('../helpers/revenue');
 
 const router = express.Router();
 const { LOAN_TYPES, getLoanTypeConfig } = require('../config/loanTypes');
@@ -1193,6 +1194,23 @@ router.post('/:id/repay', authenticate, [
       total_paid: newTotalPaid,
       status: newStatus
     });
+
+    // Microfinance loan (client without savings): 100% of interest → company revenue
+    if (interestAmount > 0) {
+      const hasSavings = await clientHasSavings(loan.client_id);
+      if (!hasSavings) {
+        await createRevenue({
+          source: REVENUE_SOURCES.MICROFINANCE_INTEREST,
+          amount: interestAmount,
+          currency: loanCurrency,
+          transaction_id: transaction.id,
+          loan_id: loan.id,
+          description: `Microfinance loan interest from repayment for ${loan.loan_number}`,
+          revenue_date: paymentDateForDb,
+          created_by: req.userId
+        });
+      }
+    }
 
     // Notify client (Notification model requires user_id and type in info|success|warning|error)
     const notifyUserId = loan.client?.user_id;

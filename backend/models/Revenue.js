@@ -13,8 +13,9 @@ module.exports = (sequelize) => {
       unique: true
     },
     source: {
-      type: DataTypes.ENUM('loan_interest', 'savings_interest', 'fees', 'other'),
-      allowNull: false
+      type: DataTypes.STRING(50),
+      allowNull: false,
+      comment: 'microfinance_interest, dues, general_interest, penalty, loan_interest, savings_interest, fees, other'
     },
     loan_id: {
       type: DataTypes.INTEGER,

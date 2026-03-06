@@ -4,6 +4,7 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getBorrowerClient } = require('../helpers/borrower');
+const { createRevenue, REVENUE_SOURCES } = require('../helpers/revenue');
 
 const router = express.Router();
 
@@ -267,6 +268,49 @@ router.post('/', [
       } else {
         console.warn(`Due payment currency (${currency}) does not match client dues currency (${updatedCurrency})`);
       }
+    }
+
+    // New revenue model: create Revenue records for company share
+    try {
+      const amount = parseFloat(transaction.amount || 0);
+      const txnDate = transaction.transaction_date || new Date();
+      if (req.body.type === 'due_payment' && amount > 0) {
+        const companyShare = amount * 0.45;
+        await createRevenue({
+          source: REVENUE_SOURCES.DUES,
+          amount: companyShare,
+          currency,
+          transaction_id: transaction.id,
+          description: `Dues revenue (45%) from client ${transaction.client_id}`,
+          revenue_date: txnDate,
+          created_by: req.userId
+        });
+      } else if (req.body.type === 'general_interest' && amount > 0) {
+        const companyShare = amount * 0.30;
+        await createRevenue({
+          source: REVENUE_SOURCES.GENERAL_INTEREST,
+          amount: companyShare,
+          currency,
+          transaction_id: transaction.id,
+          loan_id: transaction.loan_id || null,
+          description: `General interest revenue (30%) from loan interest`,
+          revenue_date: txnDate,
+          created_by: req.userId
+        });
+      } else if (req.body.type === 'penalty' && amount > 0) {
+        const companyShare = amount * 0.50;
+        await createRevenue({
+          source: REVENUE_SOURCES.PENALTY,
+          amount: companyShare,
+          currency,
+          transaction_id: transaction.id,
+          description: `Penalty/fine revenue (50%) from client`,
+          revenue_date: txnDate,
+          created_by: req.userId
+        });
+      }
+    } catch (revenueErr) {
+      console.error('Revenue creation on transaction error:', revenueErr);
     }
 
     // When a loan_payment transaction is created via Transactions UI, apply it to the loan so repayments take effect
