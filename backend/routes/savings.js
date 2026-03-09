@@ -128,22 +128,23 @@ router.post('/', [
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    // Generate unique account number
+    // Generate unique account number (use max id + 1 to avoid collision with soft-deleted accounts)
     let accountNumber;
     let isUnique = false;
     let attempts = 0;
     const maxAttempts = 10;
-    
+
     while (!isUnique && attempts < maxAttempts) {
-      const accountCount = await db.SavingsAccount.count({ paranoid: false }); // Include soft-deleted accounts
-      accountNumber = `SAV${String(accountCount + 1 + attempts).padStart(8, '0')}`;
-      
-      // Check if account number already exists
+      const maxId = await db.SavingsAccount.max('id', { paranoid: false });
+      const nextNum = (maxId || 0) + 1 + attempts;
+      accountNumber = `SAV${String(nextNum).padStart(8, '0')}`;
+
+      // Check if account number already exists (including soft-deleted)
       const existingAccount = await db.SavingsAccount.findOne({
         where: { account_number: accountNumber },
         paranoid: false
       });
-      
+
       if (!existingAccount) {
         isUnique = true;
       } else {

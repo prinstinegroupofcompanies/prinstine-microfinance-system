@@ -97,8 +97,13 @@ const Transactions = () => {
       if (selectedClient && selectedClient.dues_currency) {
         setFormData(prev => ({ ...prev, currency: selectedClient.dues_currency }));
       }
+    } else if ((formData.type === 'deposit' || formData.type === 'withdrawal') && formData.savings_account_id) {
+      const selectedAccount = savingsAccounts.find(a => a.id === parseInt(formData.savings_account_id));
+      if (selectedAccount && selectedAccount.currency) {
+        setFormData(prev => ({ ...prev, currency: selectedAccount.currency }));
+      }
     }
-  }, [formData.loan_id, formData.client_id, formData.type, loans, clients]);
+  }, [formData.loan_id, formData.client_id, formData.type, formData.savings_account_id, loans, clients, savingsAccounts]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -114,6 +119,12 @@ const Transactions = () => {
       }
       if (!formData.type || formData.type === '') {
         toast.error('Please select a transaction type');
+        return;
+      }
+
+      // Validate savings account required for deposit/withdrawal
+      if ((formData.type === 'deposit' || formData.type === 'withdrawal') && (!formData.savings_account_id || formData.savings_account_id === '')) {
+        toast.error('Please select a savings account for deposit or withdrawal');
         return;
       }
 
@@ -182,6 +193,7 @@ const Transactions = () => {
         transaction_date: new Date().toISOString().split('T')[0]
       });
       fetchTransactions();
+      fetchSavingsAccounts();
     } catch (error) {
       console.error('Failed to create transaction:', error);
       console.error('Error response:', error.response?.data);
@@ -591,7 +603,7 @@ const Transactions = () => {
                         <select
                           className="form-select"
                           value={formData.client_id}
-                          onChange={(e) => setFormData({ ...formData, client_id: e.target.value })}
+                          onChange={(e) => setFormData({ ...formData, client_id: e.target.value, savings_account_id: '', loan_id: '' })}
                           required
                         >
                           <option value="">Select Client</option>
@@ -681,6 +693,35 @@ const Transactions = () => {
                               </option>
                             ))}
                           </select>
+                        </div>
+                      )}
+                      {(formData.type === 'deposit' || formData.type === 'withdrawal') && (
+                        <div className="col-md-6 mb-3">
+                          <label className="form-label">Savings Account <span className="text-danger">*</span></label>
+                          <select
+                            className="form-select"
+                            value={formData.savings_account_id}
+                            onChange={(e) => {
+                              const selectedAccount = savingsAccounts.find(a => a.id === parseInt(e.target.value));
+                              setFormData({ 
+                                ...formData, 
+                                savings_account_id: e.target.value,
+                                currency: selectedAccount?.currency || formData.currency || 'USD'
+                              });
+                            }}
+                            required={formData.type === 'deposit' || formData.type === 'withdrawal'}
+                          >
+                            <option value="">Select Savings Account</option>
+                            {savingsAccounts
+                              .filter(a => !formData.client_id || a.client_id === parseInt(formData.client_id))
+                              .filter(a => a.status === 'active')
+                              .map((account) => (
+                                <option key={account.id} value={account.id}>
+                                  {account.account_number} - {account.client?.first_name} {account.client?.last_name} ({account.currency || 'USD'})
+                                </option>
+                              ))}
+                          </select>
+                          <small className="text-muted">Only active accounts for the selected client</small>
                         </div>
                       )}
                       <div className="col-md-12 mb-3">
@@ -959,7 +1000,9 @@ const Transactions = () => {
                       </select>
                     </div>
                     <div className="col-md-6 mb-3">
-                      <label className="form-label">Savings Account (Optional)</label>
+                      <label className="form-label">
+                        Savings Account {['deposit', 'withdrawal'].includes(formData.type) ? <span className="text-danger">*</span> : '(Optional)'}
+                      </label>
                       <select
                         className="form-select"
                         name="savings_account_id"
@@ -967,11 +1010,14 @@ const Transactions = () => {
                         onChange={(e) => setFormData({ ...formData, savings_account_id: e.target.value })}
                       >
                         <option value="">Select Savings Account</option>
-                        {savingsAccounts.map(account => (
-                          <option key={account.id} value={account.id}>
-                            {account.account_number} - {account.client?.first_name} {account.client?.last_name}
-                          </option>
-                        ))}
+                        {savingsAccounts
+                          .filter(a => !formData.client_id || a.client_id === parseInt(formData.client_id))
+                          .filter(a => a.status === 'active')
+                          .map(account => (
+                            <option key={account.id} value={account.id}>
+                              {account.account_number} - {account.client?.first_name} {account.client?.last_name}
+                            </option>
+                          ))}
                       </select>
                     </div>
                     <div className="col-md-6 mb-3">

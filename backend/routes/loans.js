@@ -677,8 +677,8 @@ router.post('/', authenticate, [
   }
 });
 
-// Approve loan – admin, head_micro_loan, supervisor, or micro_loan_officer
-router.post('/:id/approve', authenticate, authorize('admin', 'head_micro_loan', 'supervisor', 'micro_loan_officer'), async (req, res) => {
+// Approve loan – admin, head_micro_loan, or supervisor only (not micro_loan_officer)
+router.post('/:id/approve', authenticate, authorize('admin', 'head_micro_loan', 'supervisor'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {
@@ -704,8 +704,8 @@ router.post('/:id/approve', authenticate, authorize('admin', 'head_micro_loan', 
   }
 });
 
-// Reject loan (cancel pending) – admin, head_micro_loan, supervisor, or micro_loan_officer
-router.post('/:id/reject', authenticate, authorize('admin', 'head_micro_loan', 'supervisor', 'micro_loan_officer'), async (req, res) => {
+// Reject loan (cancel pending) – admin, head_micro_loan, or supervisor only
+router.post('/:id/reject', authenticate, authorize('admin', 'head_micro_loan', 'supervisor'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {

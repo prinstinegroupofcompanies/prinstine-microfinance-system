@@ -52,6 +52,7 @@ router.get('/', async (req, res) => {
         include: [
           { model: db.Client, as: 'client', required: false },
           { model: db.Loan, as: 'loan', required: false },
+          { model: db.SavingsAccount, as: 'savingsAccount', required: false },
           { model: db.Branch, as: 'branch', required: false }
         ],
         order: [['createdAt', 'DESC']],
@@ -128,6 +129,79 @@ router.post('/', [
       }
     }
 
+    // For deposit/withdrawal, savings_account_id is required and must match client
+    if (req.body.type === 'deposit' || req.body.type === 'withdrawal') {
+      if (!req.body.savings_account_id) {
+        return res.status(400).json({
+          success: false,
+          message: 'Savings account is required for deposit and withdrawal transactions'
+        });
+      }
+      const savings = await db.SavingsAccount.findByPk(req.body.savings_account_id);
+      if (!savings) {
+        return res.status(404).json({ success: false, message: 'Savings account not found' });
+      }
+      if (savings.client_id !== parseInt(req.body.client_id)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Savings account does not belong to the selected client'
+        });
+      }
+      if (savings.status !== 'active') {
+        return res.status(400).json({
+          success: false,
+          message: 'Savings account is not active'
+        });
+      }
+      const amount = parseFloat(req.body.amount || 0);
+      if (req.body.type === 'withdrawal') {
+        const currentBalance = parseFloat(savings.balance || 0);
+        if (amount > currentBalance) {
+          const sym = savings.currency === 'LRD' ? 'LRD' : '$';
+          return res.status(400).json({
+            success: false,
+            message: `Insufficient balance. Current balance: ${sym}${currentBalance.toFixed(2)}`
+          });
+        }
+      }
+    }
+
+    // Determine currency for transaction (before building transactionData)
+    let currency = req.body.currency || 'USD';
+    if (req.body.loan_id && !req.body.currency) {
+      const loan = await db.Loan.findByPk(req.body.loan_id);
+      if (loan && loan.currency) {
+        currency = loan.currency;
+      }
+    }
+    if (req.body.savings_account_id && !req.body.currency) {
+      const savings = await db.SavingsAccount.findByPk(req.body.savings_account_id);
+      if (savings && savings.currency) {
+        currency = savings.currency;
+      }
+    }
+    if (req.body.type === 'due_payment') {
+      const currentDues = parseFloat(client.total_dues || 0);
+      if (client.dues_currency) {
+        if (req.body.currency && req.body.currency !== client.dues_currency) {
+          if (currentDues === 0) {
+            currency = req.body.currency;
+          } else {
+            return res.status(400).json({
+              success: false,
+              message: `Due payment currency must match client's dues currency (${client.dues_currency})`
+            });
+          }
+        }
+        if (!req.body.currency) {
+          currency = client.dues_currency;
+        }
+      }
+    }
+    if (!['LRD', 'USD'].includes(currency)) {
+      currency = 'USD';
+    }
+
     // Generate unique transaction number (avoid count-based collisions)
     let transactionNumber;
     try {
@@ -158,53 +232,6 @@ router.post('/', [
     } catch (error) {
       console.error('Transaction number generation error:', error);
       transactionNumber = `TXN${String(Date.now()).slice(-8)}`;
-    }
-
-    // Determine currency for transaction
-    let currency = req.body.currency || 'USD';
-    
-    // If transaction is related to a loan, inherit currency from loan
-    if (req.body.loan_id && !req.body.currency) {
-      const loan = await db.Loan.findByPk(req.body.loan_id);
-      if (loan && loan.currency) {
-        currency = loan.currency;
-      }
-    }
-    
-    // If transaction is related to a savings account, inherit currency from savings
-    if (req.body.savings_account_id && !req.body.currency) {
-      const savings = await db.SavingsAccount.findByPk(req.body.savings_account_id);
-      if (savings && savings.currency) {
-        currency = savings.currency;
-      }
-    }
-    
-    // If due payment, validate and inherit currency from client's dues_currency
-    if (req.body.type === 'due_payment') {
-      const currentDues = parseFloat(client.total_dues || 0);
-      if (client.dues_currency) {
-        // If currency provided, validate it matches client's dues currency
-        if (req.body.currency && req.body.currency !== client.dues_currency) {
-          // Allow switching currency only when no outstanding dues exist yet
-          if (currentDues === 0) {
-            currency = req.body.currency;
-          } else {
-            return res.status(400).json({ 
-              success: false, 
-              message: `Due payment currency must match client's dues currency (${client.dues_currency})` 
-            });
-          }
-        }
-        // If no currency provided, use client's dues currency
-        if (!req.body.currency) {
-          currency = client.dues_currency;
-        }
-      }
-    }
-    
-    // Validate currency
-    if (!['LRD', 'USD'].includes(currency)) {
-      currency = 'USD'; // Default to USD if invalid
     }
 
     // Prepare transaction data
@@ -238,35 +265,50 @@ router.post('/', [
       }
     }
 
-    // Handle due payment - add or reduce client's total_dues (only if same currency)
-    if (req.body.type === 'due_payment' && client) {
+    // Handle due payment - re-fetch client to get latest total_dues, then deduct from outstanding
+    if (req.body.type === 'due_payment') {
       const paymentAmount = parseFloat(req.body.amount || 0);
-      const currentDues = parseFloat(client.total_dues || 0);
-      let updatedCurrency = client.dues_currency || currency;
+      const clientForDues = await db.Client.findByPk(req.body.client_id);
+      if (clientForDues) {
+        const currentDues = parseFloat(clientForDues.total_dues || 0);
+        let updatedCurrency = clientForDues.dues_currency || currency;
 
-      // Allow updating dues currency when there are no outstanding dues yet
-      if (currentDues === 0 && req.body.currency) {
-        updatedCurrency = req.body.currency;
-      }
-
-      // If client has no dues currency yet or we're switching with zero dues, set it from transaction
-      if ((!client.dues_currency || currentDues === 0) && updatedCurrency) {
-        await client.update({ dues_currency: updatedCurrency });
-      }
-
-      // Currency should already match at this point (validated above)
-      if (updatedCurrency === currency) {
-        let newDues = 0;
-        if (currentDues >= 0) {
-          // No outstanding dues yet - treat this as adding dues
-          newDues = -Math.abs(paymentAmount);
-        } else {
-          // Reduce outstanding dues (stored as negative)
-          newDues = Math.min(0, currentDues + paymentAmount);
+        if (currentDues === 0 && req.body.currency) {
+          updatedCurrency = req.body.currency;
         }
-        await client.update({ total_dues: newDues });
-      } else {
-        console.warn(`Due payment currency (${currency}) does not match client dues currency (${updatedCurrency})`);
+
+        if ((!clientForDues.dues_currency || currentDues === 0) && updatedCurrency) {
+          await clientForDues.update({ dues_currency: updatedCurrency });
+        }
+
+        if (updatedCurrency === currency) {
+          let newDues = 0;
+          if (currentDues >= 0) {
+            newDues = -Math.abs(paymentAmount);
+          } else {
+            newDues = Math.min(0, currentDues + paymentAmount);
+          }
+          await clientForDues.update({ total_dues: newDues });
+        } else {
+          console.warn(`Due payment currency (${currency}) does not match client dues currency (${updatedCurrency})`);
+        }
+      }
+    }
+
+    // When deposit or withdrawal is created via Transactions, update savings balance in real time
+    if ((req.body.type === 'deposit' || req.body.type === 'withdrawal') && transaction.savings_account_id) {
+      try {
+        const savingsAccount = await db.SavingsAccount.findByPk(transaction.savings_account_id);
+        if (savingsAccount && savingsAccount.status === 'active') {
+          const amount = parseFloat(transaction.amount || 0);
+          const currentBalance = parseFloat(savingsAccount.balance || 0);
+          const newBalance = req.body.type === 'deposit'
+            ? currentBalance + amount
+            : Math.max(0, currentBalance - amount);
+          await savingsAccount.update({ balance: newBalance });
+        }
+      } catch (savingsErr) {
+        console.error('Update savings balance on transaction error:', savingsErr);
       }
     }
 

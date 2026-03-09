@@ -45,8 +45,8 @@ export const ROLE_PERMISSIONS = {
     canViewLoans: true,
     canEditLoans: true,
     canDeleteLoans: false,
-    canApproveClients: true,
-    canApproveLoans: true,
+    canApproveClients: false,
+    canApproveLoans: false,
     canApproveKYC: true,
     canDisburseLoans: false,
     canDisburseSavings: false,
@@ -248,13 +248,13 @@ export const getMenuItemsForRole = (userRole) => {
       excludeRoles: ['borrower', 'supervisor', 'finance', 'accountant', 'hr', 'teller', 'customer_service']
     },
     
-    // Approval Center - Approvers only
+    // Approval Center - Approvers only (admin, head_micro_loan, supervisor; not micro_loan_officer)
     { 
       path: '/approval-center', 
       icon: 'fas fa-check-circle', 
       label: 'Approval Center', 
-      roles: ['admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'general_manager', 'branch_manager'],
-      excludeRoles: ['borrower', 'finance', 'accountant', 'hr', 'teller', 'loan_officer', 'customer_service']
+      roles: ['admin', 'head_micro_loan', 'supervisor', 'general_manager', 'branch_manager'],
+      excludeRoles: ['borrower', 'finance', 'accountant', 'hr', 'teller', 'loan_officer', 'customer_service', 'micro_loan_officer']
     },
     
     // Accounting - Finance and accounting roles
