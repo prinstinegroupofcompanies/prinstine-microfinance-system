@@ -192,7 +192,7 @@ const Reports = () => {
     if (reportType === 'revenue') {
       fetchRevenueList();
     }
-  }, [reportType, fetchRevenueList]);
+  }, [reportType, revenuePage, revenueRowsPerPage]);
 
   useEffect(() => {
     if (reportType !== 'clients') return;
@@ -274,7 +274,7 @@ const Reports = () => {
     if (reportType !== 'revenue') return;
     const interval = setInterval(fetchRevenueList, 30000);
     return () => clearInterval(interval);
-  }, [reportType, fetchRevenueList]);
+  }, [reportType, revenuePage, revenueRowsPerPage]);
 
   // Sync report type from URL (e.g. when using sidebar links)
   useEffect(() => {
