@@ -132,6 +132,8 @@ const Reports = () => {
   const [clientReportsList, setClientReportsList] = useState([]);
   const [clientReportsLoading, setClientReportsLoading] = useState(false);
   const [clientReportsCurrency, setClientReportsCurrency] = useState('ALL');
+  const [clientReportsPreset, setClientReportsPreset] = useState('custom');
+  const [clientReportsMonth, setClientReportsMonth] = useState('');
   const [clientReportsFrom, setClientReportsFrom] = useState(() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -140,6 +142,12 @@ const Reports = () => {
   const [clientReportsTo, setClientReportsTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [clientReportsSearch, setClientReportsSearch] = useState('');
   const [clientReportsExpandedId, setClientReportsExpandedId] = useState(null);
+  const [clientReportsPage, setClientReportsPage] = useState(1);
+  const [clientReportsRowsPerPage, setClientReportsRowsPerPage] = useState(20);
+  const [clientReportsPagination, setClientReportsPagination] = useState({ total: 0, page: 1, limit: 20, pages: 1 });
+  const [revenuePage, setRevenuePage] = useState(1);
+  const [revenueRowsPerPage, setRevenueRowsPerPage] = useState(20);
+  const [revenuePagination, setRevenuePagination] = useState({ total: 0, page: 1, limit: 20, pages: 1 });
 
   const fetchClientReports = useCallback(async () => {
     const from = clientReportsFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -151,20 +159,28 @@ const Reports = () => {
     setClientReportsLoading(true);
     try {
       const params = new URLSearchParams();
-      params.set('from', from);
-      params.set('to', to);
+      if (clientReportsMonth) {
+        params.set('month', clientReportsMonth);
+      } else {
+        params.set('from', from);
+        params.set('to', to);
+      }
+      params.set('page', String(clientReportsPage));
+      params.set('limit', String(clientReportsRowsPerPage));
       if (clientReportsCurrency) params.set('currency', clientReportsCurrency);
       if (clientReportsSearch.trim()) params.set('search', clientReportsSearch.trim());
       const res = await apiClient.get(`/api/reports/clients?${params.toString()}`);
       setClientReportsList(res.data?.data?.clients ?? []);
+      setClientReportsPagination(res.data?.data?.pagination || { total: 0, page: clientReportsPage, limit: clientReportsRowsPerPage, pages: 1 });
       setClientReportsExpandedId(null);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to load client reports');
       setClientReportsList([]);
+      setClientReportsPagination({ total: 0, page: 1, limit: clientReportsRowsPerPage, pages: 1 });
     } finally {
       setClientReportsLoading(false);
     }
-  }, [clientReportsFrom, clientReportsTo, clientReportsCurrency, clientReportsSearch]);
+  }, [clientReportsFrom, clientReportsTo, clientReportsMonth, clientReportsCurrency, clientReportsSearch, clientReportsPage, clientReportsRowsPerPage]);
 
   useEffect(() => {
     if (reportType === 'clients') {
@@ -172,12 +188,93 @@ const Reports = () => {
     }
   }, [reportType, fetchClientReports]);
 
+  useEffect(() => {
+    if (reportType === 'revenue') {
+      fetchRevenueList();
+    }
+  }, [reportType, fetchRevenueList]);
+
+  useEffect(() => {
+    if (reportType !== 'clients') return;
+    if (clientReportsPreset === 'custom') return;
+    const now = new Date();
+    let fromDate = new Date(now);
+
+    if (clientReportsPreset === 'this_month') {
+      fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
+    } else if (clientReportsPreset === 'last_month') {
+      const startLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const endLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+      setClientReportsFrom(startLastMonth.toISOString().slice(0, 10));
+      setClientReportsTo(endLastMonth.toISOString().slice(0, 10));
+      setClientReportsMonth('');
+      return;
+    } else if (clientReportsPreset === 'last_7_days') {
+      fromDate.setDate(now.getDate() - 6);
+    } else if (clientReportsPreset === 'last_30_days') {
+      fromDate.setDate(now.getDate() - 29);
+    } else if (clientReportsPreset === 'this_year') {
+      fromDate = new Date(now.getFullYear(), 0, 1);
+    }
+
+    setClientReportsFrom(fromDate.toISOString().slice(0, 10));
+    setClientReportsTo(now.toISOString().slice(0, 10));
+    setClientReportsMonth('');
+  }, [reportType, clientReportsPreset]);
+
+  useEffect(() => {
+    if (reportType !== 'clients') return;
+    const timer = setTimeout(() => {
+      setClientReportsPage(1);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [reportType, clientReportsFrom, clientReportsTo, clientReportsMonth, clientReportsCurrency, clientReportsSearch]);
+
+  const clientReportsTotalPages = Math.max(1, clientReportsPagination.pages || 1);
+  const clientReportsStartPage = Math.max(1, clientReportsPage - 2);
+  const clientReportsEndPage = Math.min(clientReportsTotalPages, clientReportsPage + 2);
+  const clientReportsPageButtons = [];
+  for (let p = clientReportsStartPage; p <= clientReportsEndPage; p += 1) clientReportsPageButtons.push(p);
+  const paginatedClientReports = clientReportsList;
+
+  useEffect(() => {
+    if (clientReportsPage > clientReportsTotalPages) {
+      setClientReportsPage(clientReportsTotalPages);
+    }
+  }, [clientReportsPage, clientReportsTotalPages]);
+
+  const revenueTotalPages = Math.max(1, revenuePagination.pages || 1);
+  const revenueStartPage = Math.max(1, revenuePage - 2);
+  const revenueEndPage = Math.min(revenueTotalPages, revenuePage + 2);
+  const revenuePageButtons = [];
+  for (let p = revenueStartPage; p <= revenueEndPage; p += 1) revenuePageButtons.push(p);
+
+  useEffect(() => {
+    if (revenuePage > revenueTotalPages) {
+      setRevenuePage(revenueTotalPages);
+    }
+  }, [revenuePage, revenueTotalPages]);
+
+  useEffect(() => {
+    // Collapse expanded row if that client is not on current page
+    if (!clientReportsExpandedId) return;
+    const visible = clientReportsList.some(c => c.id === clientReportsExpandedId);
+    if (!visible) setClientReportsExpandedId(null);
+  }, [clientReportsExpandedId, clientReportsList]);
+
   // Real-time: refetch client reports every 30s when on clients tab
   useEffect(() => {
     if (reportType !== 'clients') return;
     const interval = setInterval(fetchClientReports, 30000);
     return () => clearInterval(interval);
   }, [reportType, fetchClientReports]);
+
+  // Real-time: refetch revenue list every 30s when on revenue tab
+  useEffect(() => {
+    if (reportType !== 'revenue') return;
+    const interval = setInterval(fetchRevenueList, 30000);
+    return () => clearInterval(interval);
+  }, [reportType, fetchRevenueList]);
 
   // Sync report type from URL (e.g. when using sidebar links)
   useEffect(() => {
@@ -470,18 +567,37 @@ const Reports = () => {
         }));
       }
 
-      // Fetch detailed revenue list
-      const revenueListResponse = await apiClient.get('/api/revenue');
+    } catch (error) {
+      console.error('Failed to fetch revenue data:', error);
+    }
+  };
+
+  const fetchRevenueList = useCallback(async () => {
+    try {
+      const params = new URLSearchParams();
+      params.set('page', String(revenuePage));
+      params.set('limit', String(revenueRowsPerPage));
+      const revenueListResponse = await apiClient.get(`/api/revenue?${params.toString()}`);
       if (revenueListResponse.data.success) {
         setRevenueData(prev => ({
           ...prev,
           revenues: revenueListResponse.data.data.revenues || []
         }));
+        setRevenuePagination(
+          revenueListResponse.data?.data?.pagination || {
+            total: 0,
+            page: revenuePage,
+            limit: revenueRowsPerPage,
+            pages: 1
+          }
+        );
       }
     } catch (error) {
-      console.error('Failed to fetch revenue data:', error);
+      console.error('Failed to fetch revenue list:', error);
+      setRevenueData(prev => ({ ...prev, revenues: [] }));
+      setRevenuePagination({ total: 0, page: 1, limit: revenueRowsPerPage, pages: 1 });
     }
-  };
+  }, [revenuePage, revenueRowsPerPage]);
 
   // Generate financial data from real historical statistics
   const financialData = historicalData && dashboardStats ? {
@@ -1270,6 +1386,7 @@ const Reports = () => {
                   const isAll = clientReportsCurrency === 'ALL';
                   const columns = [
                     { key: 'client_number', header: 'ID#', format: (v, row) => v ?? row.id ?? '-' },
+                    { key: 'last_transaction_date', header: 'Last Txn Date', format: (v) => (v ? new Date(v).toLocaleDateString() : '-') },
                     { key: 'savings_id', header: 'Savings ID#', format: (v) => v ?? '-' },
                     { key: 'name', header: 'Name', format: (v) => v ?? '-' },
                     ...(isAll
@@ -1323,6 +1440,7 @@ const Reports = () => {
                   const isAll = clientReportsCurrency === 'ALL';
                   const columns = [
                     { key: 'client_number', header: 'ID#', format: (v, row) => v ?? row.id ?? '-' },
+                    { key: 'last_transaction_date', header: 'Last Txn Date', format: (v) => (v ? new Date(v).toLocaleDateString() : '-') },
                     { key: 'savings_id', header: 'Savings ID#', format: (v) => v ?? '-' },
                     { key: 'name', header: 'Name', format: (v) => v ?? '-' },
                     ...(isAll
@@ -1380,7 +1498,7 @@ const Reports = () => {
             {/* Period and help text */}
             <div className="mb-3">
               <span className="text-muted small me-2">
-                <strong>Period:</strong> {clientReportsFrom || '—'} to {clientReportsTo || '—'}
+                <strong>Period:</strong> {clientReportsMonth ? clientReportsMonth : `${clientReportsFrom || '—'} to ${clientReportsTo || '—'}`}
               </span>
               <span className="text-muted small d-block mt-1">
                 Loan repayment, personal/general interest, dues paid and penalty are for this period; savings and outstanding loan/dues are current.
@@ -1389,12 +1507,44 @@ const Reports = () => {
             {/* Filters */}
             <div className="row g-3 mb-4">
               <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">Preset</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={clientReportsPreset}
+                  onChange={(e) => setClientReportsPreset(e.target.value)}
+                >
+                  <option value="custom">Custom Range</option>
+                  <option value="this_month">This Month</option>
+                  <option value="last_month">Last Month</option>
+                  <option value="last_7_days">Last 7 Days</option>
+                  <option value="last_30_days">Last 30 Days</option>
+                  <option value="this_year">This Year</option>
+                </select>
+              </div>
+              <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">Month</label>
+                <input
+                  type="month"
+                  className="form-control form-control-sm"
+                  value={clientReportsMonth}
+                  onChange={(e) => {
+                    setClientReportsMonth(e.target.value);
+                    if (e.target.value) setClientReportsPreset('custom');
+                  }}
+                />
+              </div>
+              <div className="col-md-6 col-lg-2">
                 <label className="form-label small text-muted">From</label>
                 <input
                   type="date"
                   className="form-control form-control-sm"
                   value={clientReportsFrom}
-                  onChange={(e) => setClientReportsFrom(e.target.value)}
+                  onChange={(e) => {
+                    setClientReportsFrom(e.target.value);
+                    setClientReportsMonth('');
+                    setClientReportsPreset('custom');
+                  }}
+                  disabled={!!clientReportsMonth}
                 />
               </div>
               <div className="col-md-6 col-lg-2">
@@ -1403,7 +1553,12 @@ const Reports = () => {
                   type="date"
                   className="form-control form-control-sm"
                   value={clientReportsTo}
-                  onChange={(e) => setClientReportsTo(e.target.value)}
+                  onChange={(e) => {
+                    setClientReportsTo(e.target.value);
+                    setClientReportsMonth('');
+                    setClientReportsPreset('custom');
+                  }}
+                  disabled={!!clientReportsMonth}
                 />
               </div>
               <div className="col-md-6 col-lg-2">
@@ -1418,7 +1573,7 @@ const Reports = () => {
                   <option value="USD">USD</option>
                 </select>
               </div>
-              <div className="col-md-6 col-lg-3">
+              <div className="col-md-6 col-lg-2">
                 <label className="form-label small text-muted">Search by name or ID</label>
                 <input
                   type="text"
@@ -1459,6 +1614,7 @@ const Reports = () => {
                   <thead className="table-light">
                     <tr>
                       <th>ID#</th>
+                      <th>Last Txn Date</th>
                       <th>Savings ID#</th>
                       <th>Name</th>
                       {clientReportsCurrency === 'ALL' ? (
@@ -1500,15 +1656,16 @@ const Reports = () => {
                   <tbody>
                     {clientReportsList.length === 0 ? (
                       <tr>
-                        <td colSpan={clientReportsCurrency === 'ALL' ? 22 : 13} className="text-center text-muted py-4">
+                        <td colSpan={clientReportsCurrency === 'ALL' ? 23 : 14} className="text-center text-muted py-4">
                           No clients match the filters. Try adjusting dates, currency, or search.
                         </td>
                       </tr>
                     ) : (
-                      clientReportsList.map((row) => (
+                      paginatedClientReports.map((row) => (
                         <React.Fragment key={row.id}>
                           <tr>
                             <td>{row.client_number ?? row.id}</td>
+                            <td>{row.last_transaction_date ? new Date(row.last_transaction_date).toLocaleDateString() : '-'}</td>
                             <td>{row.savings_id ?? '-'}</td>
                             <td>{row.name ?? '-'}</td>
                             {clientReportsCurrency === 'ALL' ? (
@@ -1561,7 +1718,7 @@ const Reports = () => {
                           </tr>
                           {clientReportsExpandedId === row.id && row.transactions && row.transactions.length > 0 && (
                             <tr>
-                              <td colSpan={clientReportsCurrency === 'ALL' ? 22 : 13} className="bg-light p-3">
+                              <td colSpan={clientReportsCurrency === 'ALL' ? 23 : 14} className="bg-light p-3">
                                 <div className="small">
                                   <strong>Transactions in period (From–To) — each with date:</strong>
                                   <div className="table-responsive mt-2">
@@ -1598,9 +1755,52 @@ const Reports = () => {
               </div>
             )}
             {!clientReportsLoading && clientReportsList.length > 0 && (
-              <p className="text-muted small mt-2 mb-0">
-                Showing {clientReportsList.length} client(s). Data refreshes when you change filters or every 30 seconds.
-              </p>
+              <div className="d-flex justify-content-between align-items-center mt-2">
+                <p className="text-muted small mb-0">
+                  Showing {clientReportsList.length === 0 ? 0 : ((clientReportsPage - 1) * clientReportsRowsPerPage + 1)}-
+                  {Math.min(clientReportsPage * clientReportsRowsPerPage, clientReportsPagination.total || 0)} of {clientReportsPagination.total || 0} client(s). Data refreshes when you change filters or every 30 seconds.
+                </p>
+                <div className="d-flex align-items-center gap-2">
+                  <select
+                    className="form-select form-select-sm"
+                    value={clientReportsRowsPerPage}
+                    onChange={(e) => {
+                      setClientReportsRowsPerPage(parseInt(e.target.value, 10));
+                      setClientReportsPage(1);
+                    }}
+                    style={{ width: 90 }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={clientReportsPage === 1} onClick={() => setClientReportsPage(p => Math.max(1, p - 1))}>Prev</button>
+                  {clientReportsStartPage > 1 && (
+                    <>
+                      <button className="btn btn-sm btn-outline-secondary" onClick={() => setClientReportsPage(1)}>1</button>
+                      {clientReportsStartPage > 2 && <span className="text-muted small">...</span>}
+                    </>
+                  )}
+                  {clientReportsPageButtons.map((p) => (
+                    <button
+                      key={p}
+                      className={`btn btn-sm ${p === clientReportsPage ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setClientReportsPage(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                  {clientReportsEndPage < clientReportsTotalPages && (
+                    <>
+                      {clientReportsEndPage < clientReportsTotalPages - 1 && <span className="text-muted small">...</span>}
+                      <button className="btn btn-sm btn-outline-secondary" onClick={() => setClientReportsPage(clientReportsTotalPages)}>{clientReportsTotalPages}</button>
+                    </>
+                  )}
+                  <span className="small text-muted">Page {clientReportsPage} / {clientReportsTotalPages}</span>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={clientReportsPage === clientReportsTotalPages} onClick={() => setClientReportsPage(p => Math.min(clientReportsTotalPages, p + 1))}>Next</button>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -1743,6 +1943,7 @@ const Reports = () => {
               </div>
               <div className="card-body">
                 {revenueData.revenues?.length > 0 ? (
+                  <>
                   <div className="table-responsive">
                     <table className="table table-hover">
                       <thead>
@@ -1779,14 +1980,14 @@ const Reports = () => {
                       </tbody>
                       <tfoot>
                         <tr className="table-primary">
-                          <th colSpan="2">Total Revenue (LRD)</th>
+                          <th colSpan="2">Page Total (LRD)</th>
                           <th>
                             LRD {(revenueData.revenues?.filter(r => (r.currency || 'USD') === 'LRD').reduce((sum, r) => sum + parseFloat(r.amount || 0), 0) ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </th>
                           <th colSpan="4"></th>
                         </tr>
                         <tr className="table-success">
-                          <th colSpan="2">Total Revenue (USD)</th>
+                          <th colSpan="2">Page Total (USD)</th>
                           <th>
                             ${(revenueData.revenues?.filter(r => (r.currency || 'USD') === 'USD').reduce((sum, r) => sum + parseFloat(r.amount || 0), 0) ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </th>
@@ -1795,6 +1996,80 @@ const Reports = () => {
                       </tfoot>
                     </table>
                   </div>
+                  <div className="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2">
+                    <small className="text-muted">
+                      Showing {((revenuePage - 1) * revenueRowsPerPage) + 1}-
+                      {Math.min(revenuePage * revenueRowsPerPage, revenuePagination.total || 0)} of {revenuePagination.total || 0} revenue record(s)
+                    </small>
+                    <div className="d-flex align-items-center gap-2 flex-wrap">
+                      <select
+                        className="form-select form-select-sm"
+                        style={{ width: '100px' }}
+                        value={revenueRowsPerPage}
+                        onChange={(e) => {
+                          setRevenueRowsPerPage(parseInt(e.target.value, 10) || 20);
+                          setRevenuePage(1);
+                        }}
+                      >
+                        <option value={10}>10</option>
+                        <option value={20}>20</option>
+                        <option value={50}>50</option>
+                        <option value={100}>100</option>
+                      </select>
+                      <button
+                        className="btn btn-sm btn-outline-secondary"
+                        disabled={revenuePage <= 1}
+                        onClick={() => setRevenuePage(1)}
+                      >
+                        First
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-secondary"
+                        disabled={revenuePage <= 1}
+                        onClick={() => setRevenuePage(prev => Math.max(1, prev - 1))}
+                      >
+                        Prev
+                      </button>
+                      {revenueStartPage > 1 && (
+                        <>
+                          <button className="btn btn-sm btn-outline-secondary" onClick={() => setRevenuePage(1)}>1</button>
+                          {revenueStartPage > 2 && <span className="text-muted">...</span>}
+                        </>
+                      )}
+                      {revenuePageButtons.map(p => (
+                        <button
+                          key={`revenue-page-${p}`}
+                          className={`btn btn-sm ${revenuePage === p ? 'btn-primary' : 'btn-outline-secondary'}`}
+                          onClick={() => setRevenuePage(p)}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                      {revenueEndPage < revenueTotalPages && (
+                        <>
+                          {revenueEndPage < revenueTotalPages - 1 && <span className="text-muted">...</span>}
+                          <button className="btn btn-sm btn-outline-secondary" onClick={() => setRevenuePage(revenueTotalPages)}>
+                            {revenueTotalPages}
+                          </button>
+                        </>
+                      )}
+                      <button
+                        className="btn btn-sm btn-outline-secondary"
+                        disabled={revenuePage >= revenueTotalPages}
+                        onClick={() => setRevenuePage(prev => Math.min(revenueTotalPages, prev + 1))}
+                      >
+                        Next
+                      </button>
+                      <button
+                        className="btn btn-sm btn-outline-secondary"
+                        disabled={revenuePage >= revenueTotalPages}
+                        onClick={() => setRevenuePage(revenueTotalPages)}
+                      >
+                        Last
+                      </button>
+                    </div>
+                  </div>
+                  </>
                 ) : (
                   <p className="text-muted text-center py-3">No revenue data available</p>
                 )}

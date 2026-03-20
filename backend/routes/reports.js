@@ -31,7 +31,10 @@ router.get('/financial', async (req, res) => {
 // outstanding dues, total dues paid, penalty. Filters: from, to, currency (LRD, USD, ALL), search by name.
 router.get('/clients', async (req, res) => {
   try {
-    const { from, to, currency = 'ALL', search } = req.query;
+    const { from, to, month, currency = 'ALL', search } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
+    const offset = (page - 1) * limit;
     const branchId = req.user?.branch_id || null;
     const userRole = req.user?.role || 'user';
 
@@ -56,13 +59,23 @@ router.get('/clients', async (req, res) => {
       clientWhere[Op.and].push({ id: { [Op.ne]: -1 } });
     }
 
+    const monthStr = month && String(month).trim().match(/^\d{4}-\d{2}$/) ? String(month).trim() : null;
     const fromStr = from && String(from).trim().match(/^\d{4}-\d{2}-\d{2}/) ? String(from).trim().slice(0, 10) : null;
     const toStr = to && String(to).trim().match(/^\d{4}-\d{2}-\d{2}/) ? String(to).trim().slice(0, 10) : null;
-    let fromDate = fromStr ? new Date(fromStr + 'T00:00:00') : new Date(0);
-    let toDate = toStr ? new Date(toStr + 'T23:59:59.999') : new Date();
+
+    let fromDate;
+    let toDate;
+    if (monthStr) {
+      const [y, m] = monthStr.split('-').map(v => parseInt(v, 10));
+      fromDate = new Date(y, m - 1, 1, 0, 0, 0, 0);
+      toDate = new Date(y, m, 0, 23, 59, 59, 999);
+    } else {
+      fromDate = fromStr ? new Date(fromStr + 'T00:00:00') : new Date(0);
+      toDate = toStr ? new Date(toStr + 'T23:59:59.999') : new Date();
+    }
     if (isNaN(fromDate.getTime())) fromDate = new Date(0);
     if (isNaN(toDate.getTime())) toDate = new Date();
-    if (fromDate > toDate && fromStr && toStr) {
+    if (fromDate > toDate && fromStr && toStr && !monthStr) {
       const swap = fromDate;
       fromDate = toDate;
       toDate = swap;
@@ -74,7 +87,7 @@ router.get('/clients', async (req, res) => {
     const transactionDateWhere = {
       status: 'completed'
     };
-    if (fromStr && toStr) {
+    if (monthStr || (fromStr && toStr)) {
       const dateCol = sequelize.cast(sequelize.col('transaction_date'), 'DATE');
       transactionDateWhere[Op.and] = [
         sequelize.where(dateCol, { [Op.gte]: fromNorm }),
@@ -82,27 +95,42 @@ router.get('/clients', async (req, res) => {
       ];
     }
 
-    const clients = await db.Client.findAll({
+    const { count: totalClients, rows: clients } = await db.Client.findAndCountAll({
       where: clientWhere,
       attributes: ['id', 'client_number', 'first_name', 'last_name', 'total_dues', 'dues_currency'],
-      order: [['client_number', 'ASC']]
+      order: [['client_number', 'ASC']],
+      limit,
+      offset
     });
 
     const clientIds = clients.map(c => c.id);
     if (clientIds.length === 0) {
-      return res.json({ success: true, data: { clients: [], currency } });
+      return res.json({
+        success: true,
+        data: {
+          clients: [],
+          currency,
+          month: monthStr,
+          from: fromNorm,
+          to: toNorm,
+          pagination: {
+            total: totalClients || 0,
+            page,
+            limit,
+            pages: Math.max(1, Math.ceil((totalClients || 0) / limit))
+          }
+        }
+      });
     }
 
     const [savingsAccounts, loans, transactions] = await Promise.all([
       db.SavingsAccount.findAll({
         where: { client_id: { [Op.in]: clientIds }, status: { [Op.in]: ['active', 'pending'] } },
-        attributes: ['client_id', 'account_number', 'currency', 'balance'],
-        paranoid: false
+        attributes: ['client_id', 'account_number', 'currency', 'balance']
       }),
       db.Loan.findAll({
         where: { client_id: { [Op.in]: clientIds } },
-        attributes: ['client_id', 'currency', 'outstanding_balance', 'total_paid', 'status'],
-        paranoid: false
+        attributes: ['client_id', 'currency', 'outstanding_balance', 'total_paid', 'status']
       }),
       db.Transaction.findAll({
         where: {
@@ -110,8 +138,7 @@ router.get('/clients', async (req, res) => {
           ...transactionDateWhere
         },
         attributes: ['client_id', 'type', 'currency', 'amount', 'transaction_date'],
-        order: [['transaction_date', 'ASC']],
-        paranoid: false
+        order: [['transaction_date', 'ASC']]
       })
     ]);
 
@@ -197,6 +224,9 @@ router.get('/clients', async (req, res) => {
         amount: parseFloat(t.amount || 0),
         currency: t.currency || 'USD'
       }));
+      const lastTransactionDate = transactionsInPeriod.length > 0
+        ? transactionsInPeriod[transactionsInPeriod.length - 1].transaction_date
+        : null;
 
       if (currency === 'LRD') {
         return {
@@ -204,6 +234,7 @@ router.get('/clients', async (req, res) => {
           client_number: client.client_number,
           savings_id: savingsIds,
           name,
+          last_transaction_date: lastTransactionDate,
           transactions: transactionsInPeriod,
           total_savings: totalSavings.lrd,
           personal_interest: personalInterest.lrd,
@@ -222,6 +253,7 @@ router.get('/clients', async (req, res) => {
           client_number: client.client_number,
           savings_id: savingsIds,
           name,
+          last_transaction_date: lastTransactionDate,
           transactions: transactionsInPeriod,
           total_savings: totalSavings.usd,
           personal_interest: personalInterest.usd,
@@ -239,6 +271,7 @@ router.get('/clients', async (req, res) => {
         client_number: client.client_number,
         savings_id: savingsIds,
         name,
+        last_transaction_date: lastTransactionDate,
         transactions: transactionsInPeriod,
         total_savings_lrd: totalSavings.lrd,
         total_savings_usd: totalSavings.usd,
@@ -265,8 +298,15 @@ router.get('/clients', async (req, res) => {
       data: {
         clients: clientsData,
         currency: currency || 'ALL',
+        month: monthStr,
         from: fromNorm,
-        to: toNorm
+        to: toNorm,
+        pagination: {
+          total: totalClients || 0,
+          page,
+          limit,
+          pages: Math.max(1, Math.ceil((totalClients || 0) / limit))
+        }
       }
     });
   } catch (error) {

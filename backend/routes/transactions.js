@@ -42,12 +42,14 @@ router.get('/', async (req, res) => {
       whereClause.type = types.length === 1 ? types[0] : { [Op.in]: types };
     }
 
-    // Get limit from query params, default to 100
-    const limit = parseInt(req.query.limit) || 100;
+    // Pagination
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 100);
+    const offset = (page - 1) * limit;
     
     let transactions = [];
     try {
-      transactions = await db.Transaction.findAll({
+      const { count, rows } = await db.Transaction.findAndCountAll({
         where: whereClause,
         include: [
           { model: db.Client, as: 'client', required: false },
@@ -56,22 +58,47 @@ router.get('/', async (req, res) => {
           { model: db.Branch, as: 'branch', required: false }
         ],
         order: [['createdAt', 'DESC']],
-        limit: limit
+        limit,
+        offset
       });
+      transactions = rows;
+      res.json({
+        success: true,
+        data: {
+          transactions,
+          pagination: {
+            total: count,
+            page,
+            limit,
+            pages: Math.max(1, Math.ceil(count / limit))
+          }
+        }
+      });
+      return;
     } catch (includeError) {
       console.error('Transaction include error:', includeError);
       // Fallback without includes if associations are misconfigured
-      transactions = await db.Transaction.findAll({
+      const { count, rows } = await db.Transaction.findAndCountAll({
         where: whereClause,
         order: [['createdAt', 'DESC']],
-        limit: limit
+        limit,
+        offset
       });
+      transactions = rows;
+      res.json({
+        success: true,
+        data: {
+          transactions,
+          pagination: {
+            total: count,
+            page,
+            limit,
+            pages: Math.max(1, Math.ceil(count / limit))
+          }
+        }
+      });
+      return;
     }
-
-    res.json({
-      success: true,
-      data: { transactions }
-    });
   } catch (error) {
     console.error('Get transactions error:', error);
     console.error('Error stack:', error.stack);

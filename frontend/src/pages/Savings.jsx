@@ -18,6 +18,9 @@ const Savings = () => {
   const [selectedAccount, setSelectedAccount] = useState(null);
   const [editingAccount, setEditingAccount] = useState(null);
   const [receipt, setReceipt] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, pages: 1 });
   const [formData, setFormData] = useState({
     client_id: '',
     account_type: 'regular',
@@ -39,20 +42,24 @@ const Savings = () => {
 
   useEffect(() => {
     fetchSavings();
+  }, [currentPage, rowsPerPage]);
+
+  useEffect(() => {
     fetchClients();
-    
     // Real-time updates every 10 seconds
     const interval = setInterval(() => {
       fetchSavings();
     }, 10000);
-    
     return () => clearInterval(interval);
   }, []);
 
   const fetchSavings = async () => {
     try {
-      const response = await apiClient.get('/api/savings');
+      const response = await apiClient.get('/api/savings', {
+        params: { page: currentPage, limit: rowsPerPage }
+      });
       setSavings(response.data.data.savingsAccounts || []);
+      setPagination(response.data.data.pagination || { total: 0, page: currentPage, limit: rowsPerPage, pages: 1 });
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch savings:', error);
@@ -266,6 +273,16 @@ const Savings = () => {
     toast.success('Savings accounts exported to Excel successfully!');
   };
 
+  const totalPages = Math.max(1, pagination.pages || 1);
+  const pageButtons = [];
+  const startPage = Math.max(1, currentPage - 2);
+  const endPage = Math.min(totalPages, currentPage + 2);
+  for (let p = startPage; p <= endPage; p += 1) pageButtons.push(p);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
   return (
     <div className="fade-in">
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -414,6 +431,53 @@ const Savings = () => {
                 </tbody>
               </table>
             </div>
+            {savings.length > 0 && (
+              <div className="d-flex justify-content-between align-items-center p-3 border-top">
+                <small className="text-muted">
+                  Showing {savings.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage + 1)}-{Math.min(currentPage * rowsPerPage, pagination.total || 0)} of {pagination.total || 0}
+                </small>
+                <div className="d-flex align-items-center gap-2">
+                  <select
+                    className="form-select form-select-sm"
+                    value={rowsPerPage}
+                    onChange={(e) => {
+                      setRowsPerPage(parseInt(e.target.value, 10));
+                      setCurrentPage(1);
+                    }}
+                    style={{ width: 90 }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}>Prev</button>
+                  {startPage > 1 && (
+                    <>
+                      <button className="btn btn-sm btn-outline-secondary" onClick={() => setCurrentPage(1)}>1</button>
+                      {startPage > 2 && <span className="text-muted small">...</span>}
+                    </>
+                  )}
+                  {pageButtons.map((p) => (
+                    <button
+                      key={p}
+                      className={`btn btn-sm ${p === currentPage ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setCurrentPage(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                  {endPage < totalPages && (
+                    <>
+                      {endPage < totalPages - 1 && <span className="text-muted small">...</span>}
+                      <button className="btn btn-sm btn-outline-secondary" onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>
+                    </>
+                  )}
+                  <span className="small text-muted">Page {currentPage} / {totalPages}</span>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}>Next</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

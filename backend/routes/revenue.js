@@ -15,6 +15,9 @@ router.use(authenticate);
 router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loan', 'supervisor', 'micro_loan_officer'), async (req, res) => {
   try {
     const { startDate, endDate, source } = req.query;
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 100);
+    const offset = (page - 1) * limit;
 
     let whereClause = {};
 
@@ -28,14 +31,16 @@ router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loa
       whereClause.source = source;
     }
 
-    const revenues = await db.Revenue.findAll({
+    const { count, rows: revenues } = await db.Revenue.findAndCountAll({
       where: whereClause,
       include: [
         { model: db.Loan, as: 'loan', required: false, attributes: ['id', 'loan_number', 'loan_type', 'currency'] },
         { model: db.Transaction, as: 'transaction', required: false, attributes: ['id', 'transaction_number', 'currency'] },
         { model: db.User, as: 'creator', required: false, attributes: ['id', 'name', 'email'] }
       ],
-      order: [['revenue_date', 'DESC']]
+      order: [['revenue_date', 'DESC']],
+      limit,
+      offset
     });
 
     // Totals from Revenue table only (no computed/legacy 20% interest)
@@ -71,7 +76,7 @@ router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loa
         summary: {
           totalRevenue: totalRevenue,
           revenueBySource,
-          count: revenues.length,
+          count: count,
           lrd: {
             totalRevenue: totalRevenueLRD,
             revenueBySource: revenueBySourceLRD
@@ -80,6 +85,12 @@ router.get('/', authorize('admin', 'finance', 'general_manager', 'head_micro_loa
             totalRevenue: totalRevenueUSD,
             revenueBySource: revenueBySourceUSD
           }
+        },
+        pagination: {
+          total: count,
+          page,
+          limit,
+          pages: Math.max(1, Math.ceil(count / limit))
         }
       }
     });

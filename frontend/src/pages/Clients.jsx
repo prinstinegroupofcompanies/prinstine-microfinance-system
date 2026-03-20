@@ -15,6 +15,9 @@ const Clients = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [rowsPerPage, setRowsPerPage] = useState(20);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, pages: 1 });
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -48,24 +51,30 @@ const Clients = () => {
 
   useEffect(() => {
     fetchClients();
+  }, [search, statusFilter, currentPage, rowsPerPage]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter]);
+
+  useEffect(() => {
     fetchBranches();
-    
     // Real-time updates every 5 seconds
     const interval = setInterval(() => {
       fetchClients();
     }, 5000);
-    
     return () => clearInterval(interval);
-  }, [search, statusFilter]);
+  }, []);
 
   const fetchClients = async () => {
     try {
-      const params = { all: 'true' }; // Fetch all clients
+      const params = { page: currentPage, limit: rowsPerPage };
       if (search) params.search = search;
       if (statusFilter !== 'all') params.status = statusFilter;
       
       const response = await apiClient.get('/api/clients', { params });
       setClients(response.data.data.clients || []);
+      setPagination(response.data.data.pagination || { total: 0, page: currentPage, limit: rowsPerPage, pages: 1 });
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch clients:', error);
@@ -258,6 +267,16 @@ const Clients = () => {
     return badges[status] || 'secondary';
   };
 
+  const totalPages = Math.max(1, pagination.pages || 1);
+  const pageButtons = [];
+  const startPage = Math.max(1, currentPage - 2);
+  const endPage = Math.min(totalPages, currentPage + 2);
+  for (let p = startPage; p <= endPage; p += 1) pageButtons.push(p);
+
+  useEffect(() => {
+    if (currentPage > totalPages) setCurrentPage(totalPages);
+  }, [currentPage, totalPages]);
+
   return (
     <div className="fade-in">
       <div className="d-flex justify-content-between align-items-center mb-4">
@@ -335,6 +354,7 @@ const Clients = () => {
               </div>
             </div>
           ) : (
+            <>
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead>
@@ -400,6 +420,54 @@ const Clients = () => {
                 </tbody>
               </table>
             </div>
+            {clients.length > 0 && (
+              <div className="d-flex justify-content-between align-items-center p-3 border-top">
+                <small className="text-muted">
+                  Showing {clients.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage + 1)}-{Math.min(currentPage * rowsPerPage, pagination.total || 0)} of {pagination.total || 0}
+                </small>
+                <div className="d-flex align-items-center gap-2">
+                  <select
+                    className="form-select form-select-sm"
+                    value={rowsPerPage}
+                    onChange={(e) => {
+                      setRowsPerPage(parseInt(e.target.value, 10));
+                      setCurrentPage(1);
+                    }}
+                    style={{ width: 90 }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}>Prev</button>
+                  {startPage > 1 && (
+                    <>
+                      <button className="btn btn-sm btn-outline-secondary" onClick={() => setCurrentPage(1)}>1</button>
+                      {startPage > 2 && <span className="text-muted small">...</span>}
+                    </>
+                  )}
+                  {pageButtons.map((p) => (
+                    <button
+                      key={p}
+                      className={`btn btn-sm ${p === currentPage ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setCurrentPage(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                  {endPage < totalPages && (
+                    <>
+                      {endPage < totalPages - 1 && <span className="text-muted small">...</span>}
+                      <button className="btn btn-sm btn-outline-secondary" onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>
+                    </>
+                  )}
+                  <span className="small text-muted">Page {currentPage} / {totalPages}</span>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}>Next</button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>

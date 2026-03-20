@@ -16,7 +16,9 @@ router.get('/', authenticate, async (req, res) => {
   try {
     const { page = 1, limit, search, status, kyc_status, all = false } = req.query;
     // If 'all' is true or no limit specified, fetch all clients (up to 10000 for safety)
-    const fetchLimit = (all === 'true' || !limit) ? 10000 : parseInt(limit);
+    const parsedLimit = parseInt(limit, 10);
+    const safeLimit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : 10000;
+    const fetchLimit = (all === 'true' || !limit) ? 10000 : safeLimit;
     const offset = (page - 1) * (fetchLimit || 10);
     const branchId = req.user?.branch_id || null;
     const userRole = req.user?.role || 'user';
@@ -76,8 +78,7 @@ router.get('/', authenticate, async (req, res) => {
       ],
       limit: fetchLimit,
       offset: offset,
-      order: [['createdAt', 'DESC']],
-      paranoid: false // Include soft-deleted for accurate count
+      order: [['createdAt', 'DESC']]
     });
 
     res.json({
@@ -87,8 +88,8 @@ router.get('/', authenticate, async (req, res) => {
         pagination: {
           total: count,
           page: parseInt(page),
-          limit: parseInt(limit),
-          pages: Math.ceil(count / limit)
+          limit: fetchLimit,
+          pages: Math.ceil(count / fetchLimit)
         }
       }
     });

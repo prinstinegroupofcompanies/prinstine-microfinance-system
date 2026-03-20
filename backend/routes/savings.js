@@ -30,18 +30,32 @@ router.get('/', async (req, res) => {
       whereClause.status = req.query.status;
     }
 
-    const savingsAccounts = await db.SavingsAccount.findAll({
+    const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit, 10) || 100);
+    const offset = (page - 1) * limit;
+
+    const { count, rows: savingsAccounts } = await db.SavingsAccount.findAndCountAll({
       where: whereClause,
       include: [
         { model: db.Client, as: 'client', required: false },
         { model: db.Branch, as: 'branch', required: false }
       ],
-      order: [['createdAt', 'DESC']]
+      order: [['createdAt', 'DESC']],
+      limit,
+      offset
     });
 
     res.json({
       success: true,
-      data: { savingsAccounts }
+      data: {
+        savingsAccounts,
+        pagination: {
+          total: count,
+          page,
+          limit,
+          pages: Math.max(1, Math.ceil(count / limit))
+        }
+      }
     });
   } catch (error) {
     console.error('Get savings accounts error:', error);
