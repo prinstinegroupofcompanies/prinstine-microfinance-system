@@ -72,7 +72,7 @@ const Signup = () => {
           </div>
 
           <div className="card-body p-4">
-            <form onSubmit={onSubmit}>
+            <form onSubmit={onSubmit} noValidate>
               <div className="mb-3">
                 <label className="form-label">Full Name</label>
                 <input
