@@ -110,42 +110,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const register = async ({ name, email, password, username }) => {
-    try {
-      const payload = {
-        name: String(name || '').trim(),
-        email: String(email || '').trim().toLowerCase(),
-        password: String(password || ''),
-        role: 'borrower'
-      };
-      if (username && String(username).trim()) {
-        payload.username = String(username).trim();
-      }
-
-      const response = await apiClient.post('/api/auth/register', payload);
-      const responseData = response?.data;
-      if (responseData?.success && responseData?.data?.token && responseData?.data?.user) {
-        const nextToken = responseData.data.token;
-        const nextUser = responseData.data.user;
-        setToken(nextToken);
-        setUser(nextUser);
-        localStorage.setItem('token', nextToken);
-        apiClient.defaults.headers.common['Authorization'] = `Bearer ${nextToken}`;
-        return { success: true };
-      }
-      return {
-        success: false,
-        message: responseData?.message || 'Signup failed'
-      };
-    } catch (error) {
-      const msg = error.response?.data?.message ||
-        error.response?.data?.errors?.[0]?.msg ||
-        error.message ||
-        'Signup failed';
-      return { success: false, message: msg };
-    }
-  };
-
   const logout = () => {
     setToken(null);
     setUser(null);
@@ -157,7 +121,6 @@ export const AuthProvider = ({ children }) => {
     user,
     loading,
     login,
-    register,
     logout,
     isAuthenticated: !!user
   };

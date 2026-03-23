@@ -5,7 +5,6 @@ import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider } from './contexts/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
 import Login from './pages/Login';
-import Signup from './pages/Signup';
 import Dashboard from './pages/Dashboard';
 import Clients from './pages/Clients';
 import Loans from './pages/Loans';
@@ -47,7 +46,6 @@ function App() {
       <Router future={routerConfig.future}>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
           <Route
             path="/"
             element={

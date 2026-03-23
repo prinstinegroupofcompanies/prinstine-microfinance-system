@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
 
@@ -169,11 +169,6 @@ const Login = () => {
                 <i className="fas fa-shield-alt me-1"></i>
                 Secure Login Portal
               </small>
-              <div className="mt-2">
-                <small className="text-muted">
-                  New here? <Link to="/signup">Create an account</Link>
-                </small>
-              </div>
             </div>
           </div>
         </div>
