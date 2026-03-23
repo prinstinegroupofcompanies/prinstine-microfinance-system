@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import apiClient from '../config/axios';
 import { toast } from 'react-toastify';
 import { Link } from 'react-router-dom';
@@ -22,6 +22,7 @@ const Savings = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [rowsPerPage, setRowsPerPage] = useState(20);
   const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, pages: 1 });
+  const fetchRequestIdRef = useRef(0);
   const [formData, setFormData] = useState({
     client_id: '',
     account_type: 'regular',
@@ -42,14 +43,27 @@ const Savings = () => {
   });
 
   const fetchSavings = useCallback(async () => {
+    const requestId = ++fetchRequestIdRef.current;
     try {
       const response = await apiClient.get('/api/savings', {
         params: { page: currentPage, limit: rowsPerPage }
       });
-      setSavings(response.data.data.savingsAccounts || []);
-      setPagination(response.data.data.pagination || { total: 0, page: currentPage, limit: rowsPerPage, pages: 1 });
+      // Ignore stale responses from older requests to keep pagination stable.
+      if (requestId !== fetchRequestIdRef.current) return;
+
+      const nextSavings = response?.data?.data?.savingsAccounts || [];
+      const nextPagination = response?.data?.data?.pagination || {
+        total: 0,
+        page: currentPage,
+        limit: rowsPerPage,
+        pages: 1
+      };
+
+      setSavings(nextSavings);
+      setPagination(nextPagination);
       setLoading(false);
     } catch (error) {
+      if (requestId !== fetchRequestIdRef.current) return;
       console.error('Failed to fetch savings:', error);
       toast.error('Failed to load savings accounts');
       setLoading(false);
@@ -277,10 +291,12 @@ const Savings = () => {
     toast.success('Savings accounts exported to Excel successfully!');
   };
 
-  const totalPages = Math.max(1, pagination.pages || 1);
+  const totalPages = Math.max(1, parseInt(pagination.pages, 10) || 1);
+  const totalItems = Math.max(0, parseInt(pagination.total, 10) || 0);
+  const safeCurrentPage = Math.max(1, Math.min(currentPage, totalPages));
   const pageButtons = [];
-  const startPage = Math.max(1, currentPage - 2);
-  const endPage = Math.min(totalPages, currentPage + 2);
+  const startPage = Math.max(1, safeCurrentPage - 2);
+  const endPage = Math.min(totalPages, safeCurrentPage + 2);
   for (let p = startPage; p <= endPage; p += 1) pageButtons.push(p);
 
   useEffect(() => {
@@ -440,10 +456,10 @@ const Savings = () => {
                 </tbody>
               </table>
             </div>
-            {savings.length > 0 && (
+            {totalItems > 0 && (
               <div className="d-flex justify-content-between align-items-center p-3 border-top">
                 <small className="text-muted">
-                  Showing {savings.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage + 1)}-{Math.min(currentPage * rowsPerPage, pagination.total || 0)} of {pagination.total || 0}
+                  Showing {savings.length === 0 ? 0 : ((safeCurrentPage - 1) * rowsPerPage + 1)}-{Math.min(safeCurrentPage * rowsPerPage, totalItems)} of {totalItems}
                 </small>
                 <div className="d-flex align-items-center gap-2">
                   <select
@@ -460,7 +476,7 @@ const Savings = () => {
                     <option value={50}>50</option>
                     <option value={100}>100</option>
                   </select>
-                  <button className="btn btn-sm btn-outline-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}>Prev</button>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={safeCurrentPage === 1} onClick={() => setCurrentPage(p => Math.max(1, p - 1))}>Prev</button>
                   {startPage > 1 && (
                     <>
                       <button className="btn btn-sm btn-outline-secondary" onClick={() => setCurrentPage(1)}>1</button>
@@ -470,7 +486,7 @@ const Savings = () => {
                   {pageButtons.map((p) => (
                     <button
                       key={p}
-                      className={`btn btn-sm ${p === currentPage ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      className={`btn btn-sm ${p === safeCurrentPage ? 'btn-primary' : 'btn-outline-secondary'}`}
                       onClick={() => setCurrentPage(p)}
                     >
                       {p}
@@ -482,8 +498,8 @@ const Savings = () => {
                       <button className="btn btn-sm btn-outline-secondary" onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>
                     </>
                   )}
-                  <span className="small text-muted">Page {currentPage} / {totalPages}</span>
-                  <button className="btn btn-sm btn-outline-secondary" disabled={currentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}>Next</button>
+                  <span className="small text-muted">Page {safeCurrentPage} / {totalPages}</span>
+                  <button className="btn btn-sm btn-outline-secondary" disabled={safeCurrentPage === totalPages} onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}>Next</button>
                 </div>
               </div>
             )}
