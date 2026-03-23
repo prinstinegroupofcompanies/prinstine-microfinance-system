@@ -98,8 +98,8 @@ router.get('/', authenticate, async (req, res) => {
       let generalInterestUSD = 0;
 
       try {
-        // Fetch all data at once for efficiency
-        const [clientsCount, allLoans, allSavings, allTransactions, allClients, loansList, transactionsList] = await Promise.all([
+        // Fetch data with DB-side aggregation to avoid large in-memory scans.
+        const [clientsCount, allLoans, allSavings, allClients, loansList, transactionsList] = await Promise.all([
           db.Client.count({ where: clientsWhere }).catch(() => 0),
           db.Loan.findAll({ 
             where: loansWhere,
@@ -111,10 +111,6 @@ router.get('/', authenticate, async (req, res) => {
               status: 'active'
             },
             attributes: ['id', 'currency', 'balance']
-          }).catch(() => []),
-          db.Transaction.findAll({ 
-            where: transactionsWhere,
-            attributes: ['id', 'client_id', 'currency', 'amount', 'type']
           }).catch(() => []),
           db.Client.findAll({
             where: clientsWhere,
@@ -180,50 +176,54 @@ router.get('/', authenticate, async (req, res) => {
           }
         });
         
-        // Calculate currency-separated transactions
-        // For borrowers, also calculate personal interest, general interest, and fines
-        
-        allTransactions.forEach(transaction => {
-          const currency = transaction.currency || 'USD';
-          const amount = parseFloat(transaction.amount || 0);
-          
-          if (transaction.type === 'loan_payment') {
-            if (currency === 'LRD') {
-              totalCollectionsLRD += amount;
-            } else {
-              totalCollectionsUSD += amount;
-            }
-          }
-          
-          if (transaction.type === 'penalty' || transaction.type === 'fee') {
-            if (currency === 'LRD') {
-              totalFinesLRD += amount;
-            } else {
-              totalFinesUSD += amount;
-            }
-          }
-          
-          // Calculate personal interest and general interest for borrowers
-          if (userRole === 'borrower') {
-            if (transaction.type === 'personal_interest_payment') {
-              if (currency === 'LRD') {
-                personalInterestLRD += amount;
-              } else {
-                personalInterestUSD += amount;
-              }
-            }
-            
-            if (transaction.type === 'general_interest') {
-              if (currency === 'LRD') {
-                generalInterestLRD += amount;
-              } else {
-                generalInterestUSD += amount;
-              }
-            }
-          }
-        });
-        
-        totalTransactions = allTransactions.length;
+        const txWhereBase = { ...transactionsWhere, status: 'completed' };
+        const [
+          txCount,
+          collectionsLrd,
+          collectionsUsd,
+          finesLrd,
+          finesUsd,
+          borrowerPersonalLrd,
+          borrowerPersonalUsd,
+          borrowerGeneralLrd,
+          borrowerGeneralUsd,
+          duesPaidClientRows
+        ] = await Promise.all([
+          db.Transaction.count({ where: txWhereBase }).catch(() => 0),
+          db.Transaction.sum('amount', { where: { ...txWhereBase, type: 'loan_payment', currency: 'LRD' } }).catch(() => 0),
+          db.Transaction.sum('amount', { where: { ...txWhereBase, type: 'loan_payment', currency: { [Op.ne]: 'LRD' } } }).catch(() => 0),
+          db.Transaction.sum('amount', { where: { ...txWhereBase, type: { [Op.in]: ['penalty', 'fee'] }, currency: 'LRD' } }).catch(() => 0),
+          db.Transaction.sum('amount', { where: { ...txWhereBase, type: { [Op.in]: ['penalty', 'fee'] }, currency: { [Op.ne]: 'LRD' } } }).catch(() => 0),
+          userRole === 'borrower'
+            ? db.Transaction.sum('amount', { where: { ...txWhereBase, type: 'personal_interest_payment', currency: 'LRD' } }).catch(() => 0)
+            : Promise.resolve(0),
+          userRole === 'borrower'
+            ? db.Transaction.sum('amount', { where: { ...txWhereBase, type: 'personal_interest_payment', currency: { [Op.ne]: 'LRD' } } }).catch(() => 0)
+            : Promise.resolve(0),
+          userRole === 'borrower'
+            ? db.Transaction.sum('amount', { where: { ...txWhereBase, type: 'general_interest', currency: 'LRD' } }).catch(() => 0)
+            : Promise.resolve(0),
+          userRole === 'borrower'
+            ? db.Transaction.sum('amount', { where: { ...txWhereBase, type: 'general_interest', currency: { [Op.ne]: 'LRD' } } }).catch(() => 0)
+            : Promise.resolve(0),
+          db.Transaction.findAll({
+            where: { ...txWhereBase, type: 'due_payment' },
+            attributes: ['client_id'],
+            group: ['client_id']
+          }).catch(() => [])
+        ]);
+
+        totalTransactions = txCount || 0;
+        totalCollectionsLRD = parseFloat(collectionsLrd || 0);
+        totalCollectionsUSD = parseFloat(collectionsUsd || 0);
+        totalFinesLRD = parseFloat(finesLrd || 0);
+        totalFinesUSD = parseFloat(finesUsd || 0);
+        personalInterestLRD = parseFloat(borrowerPersonalLrd || 0);
+        personalInterestUSD = parseFloat(borrowerPersonalUsd || 0);
+        generalInterestLRD = parseFloat(borrowerGeneralLrd || 0);
+        generalInterestUSD = parseFloat(borrowerGeneralUsd || 0);
+
+        const duesPaidClientSet = new Set((duesPaidClientRows || []).map(r => Number(r.client_id)));
         
         // Calculate currency-separated dues
         allClients.forEach(client => {
@@ -242,10 +242,7 @@ router.get('/', authenticate, async (req, res) => {
             }
           } else if (totalDues === 0) {
             // Client has paid all dues - check if they had dues before
-            const duesPayments = allTransactions.filter(t => 
-              t.client_id === client.id && t.type === 'due_payment'
-            );
-            if (duesPayments.length > 0) {
+            if (duesPaidClientSet.has(Number(client.id))) {
               if (duesCurrency === 'LRD') {
                 clientsPaidDuesLRD++;
               } else {
@@ -409,40 +406,46 @@ router.get('/historical', authenticate, async (req, res) => {
       whereClause.branch_id = branchId;
     }
 
-    // Get last 6 months of data
-    const months = [];
-    const portfolioValues = [];
-    const collections = [];
-
-    for (let i = 5; i >= 0; i--) {
+    // Get last 6 months of data (run month queries in parallel)
+    const monthDates = Array.from({ length: 6 }, (_, idx) => {
+      const i = 5 - idx;
       const date = new Date();
       date.setMonth(date.getMonth() - i);
+      return date;
+    });
+
+    const monthResults = await Promise.all(monthDates.map(async (date) => {
       const monthName = date.toLocaleString('default', { month: 'short' });
-      months.push(monthName);
-
-      // Calculate portfolio value for this month (simplified - in production, use actual historical data)
-      const portfolioResult = await db.Loan.sum('outstanding_balance', {
-        where: {
-          ...whereClause,
-          status: { [Op.in]: ['active', 'disbursed'] },
-          createdAt: { [Op.lte]: date }
-        }
-      });
-      portfolioValues.push(portfolioResult ? parseFloat(portfolioResult) : 0);
-
-      // Calculate collections for this month
-      const collectionsResult = await db.Transaction.sum('amount', {
-        where: {
-          ...whereClause,
-          type: 'loan_payment',
-          createdAt: {
-            [Op.gte]: new Date(date.getFullYear(), date.getMonth(), 1),
-            [Op.lt]: new Date(date.getFullYear(), date.getMonth() + 1, 1)
+      const [portfolioResult, collectionsResult] = await Promise.all([
+        db.Loan.sum('outstanding_balance', {
+          where: {
+            ...whereClause,
+            status: { [Op.in]: ['active', 'disbursed'] },
+            createdAt: { [Op.lte]: date }
           }
-        }
-      });
-      collections.push(collectionsResult ? parseFloat(collectionsResult) : 0);
-    }
+        }).catch(() => 0),
+        db.Transaction.sum('amount', {
+          where: {
+            ...whereClause,
+            type: 'loan_payment',
+            createdAt: {
+              [Op.gte]: new Date(date.getFullYear(), date.getMonth(), 1),
+              [Op.lt]: new Date(date.getFullYear(), date.getMonth() + 1, 1)
+            }
+          }
+        }).catch(() => 0)
+      ]);
+
+      return {
+        monthName,
+        portfolio: parseFloat(portfolioResult || 0),
+        collections: parseFloat(collectionsResult || 0)
+      };
+    }));
+
+    const months = monthResults.map(r => r.monthName);
+    const portfolioValues = monthResults.map(r => r.portfolio);
+    const collections = monthResults.map(r => r.collections);
 
     res.json({
       success: true,

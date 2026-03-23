@@ -71,7 +71,7 @@ const Dashboard = () => {
       setRealtimeData(response.data?.data ?? null);
     } catch (error) {
       console.error('Failed to fetch real-time data:', error);
-      toast.error(error.response?.data?.message || 'Failed to load real-time data');
+      // Silent for polling to avoid toast spam on transient network slowness.
     }
   };
 
@@ -82,7 +82,7 @@ const Dashboard = () => {
     } catch (error) {
       console.error('Failed to fetch historical data:', error);
       setHistoricalData({ months: [], portfolioValues: [], collections: [] });
-      toast.error(error.response?.data?.message || 'Failed to load historical data');
+      // Silent for background refreshes.
     }
   };
 
