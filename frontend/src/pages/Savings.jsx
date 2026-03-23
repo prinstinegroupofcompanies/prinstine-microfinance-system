@@ -9,6 +9,7 @@ import { APPROVER_ROLES } from '../utils/permissions';
 
 const Savings = () => {
   const { user } = useAuth();
+  const canDeleteSavings = ['admin', 'head_micro_loan'].includes(user?.role);
   const [savings, setSavings] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -406,7 +407,7 @@ const Savings = () => {
                                 >
                                   <i className="fas fa-minus"></i>
                                 </button>
-                                {user?.role === 'admin' && (
+                                {canDeleteSavings && (
                                   <button 
                                     className="btn btn-sm btn-outline-danger"
                                     onClick={() => handleDelete(account.id)}

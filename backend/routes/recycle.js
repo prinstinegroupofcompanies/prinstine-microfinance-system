@@ -6,7 +6,7 @@ const { Op } = require('sequelize');
 const router = express.Router();
 
 router.use(authenticate);
-router.use(authorize('admin')); // Only admin can access recycle bin
+router.use(authorize('admin', 'head_micro_loan')); // Admin and Head Micro Loan can access recycle bin
 
 const buildClientTransactionWhere = (clientId, loanIds, savingsIds) => {
   const transactionWhere = {

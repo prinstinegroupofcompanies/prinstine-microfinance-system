@@ -768,7 +768,7 @@ router.put('/:id', [
 });
 
 // Delete savings account (soft delete) and related transactions
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authorize('admin', 'head_micro_loan'), async (req, res) => {
   const transaction = await db.sequelize.transaction();
   try {
     const savingsAccount = await db.SavingsAccount.findByPk(req.params.id, { transaction });

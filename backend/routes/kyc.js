@@ -209,7 +209,7 @@ router.post('/:id/approve', authorize('admin', 'micro_loan_officer', 'head_micro
 });
 
 // Delete KYC document
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authorize('admin', 'head_micro_loan'), async (req, res) => {
   try {
     const document = await db.KycDocument.findByPk(req.params.id);
     if (!document) {

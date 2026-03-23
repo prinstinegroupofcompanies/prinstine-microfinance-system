@@ -738,7 +738,7 @@ router.post('/:id/reject', authenticate, authorize('admin', 'head_micro_loan', '
 });
 
 // Disburse loan
-router.post('/:id/disburse', authenticate, authorize('admin', 'branch_manager', 'general_manager', 'finance'), async (req, res) => {
+router.post('/:id/disburse', authenticate, authorize('admin', 'head_micro_loan', 'branch_manager', 'general_manager', 'finance'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {
@@ -748,9 +748,24 @@ router.post('/:id/disburse', authenticate, authorize('admin', 'branch_manager', 
       });
     }
 
+    // Disbursement should happen from approved state only.
+    if (loan.status === 'disbursed' || loan.status === 'active' || loan.status === 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: `Loan cannot be disbursed because current status is "${loan.status}".`
+      });
+    }
+
+    if (loan.status !== 'approved') {
+      return res.status(400).json({
+        success: false,
+        message: 'Only approved loans can be disbursed.'
+      });
+    }
+
     const updatePayload = {
       status: 'disbursed',
-      disbursement_date: new Date()
+      disbursement_date: new Date().toISOString().split('T')[0]
     };
     // Ensure outstanding_balance is set so repayments decrease it correctly
     const currentOutstanding = parseFloat(loan.outstanding_balance || 0);
@@ -1433,7 +1448,7 @@ router.put('/:id', authenticate, authorize('admin', 'micro_loan_officer', 'head_
 });
 
 // Delete loan (soft delete)
-router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
+router.delete('/:id', authenticate, authorize('admin', 'head_micro_loan'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {
@@ -1463,7 +1478,7 @@ router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
 });
 
 // Delete loan by loan number (for fixing duplicates - must be before /:id route)
-router.delete('/by-number/:loanNumber', authenticate, authorize('admin'), async (req, res) => {
+router.delete('/by-number/:loanNumber', authenticate, authorize('admin', 'head_micro_loan'), async (req, res) => {
   try {
     const { loanNumber } = req.params;
     

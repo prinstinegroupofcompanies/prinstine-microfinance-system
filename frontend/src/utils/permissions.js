@@ -61,17 +61,17 @@ export const ROLE_PERMISSIONS = {
     canAddClients: true,
     canViewClients: true,
     canEditClients: true,
-    canDeleteClients: false,
+    canDeleteClients: true,
     canAddLoans: true,
     canViewLoans: true,
     canEditLoans: true,
-    canDeleteLoans: false,
+    canDeleteLoans: true,
     canApproveClients: true,
     canApproveLoans: true,
     canApproveKYC: true,
-    canDisburseLoans: false,
-    canDisburseSavings: false,
-    canPerformSavingsTransactions: false,
+    canDisburseLoans: true,
+    canDisburseSavings: true,
+    canPerformSavingsTransactions: true,
     canViewAllData: true,
     canManageUsers: false,
     canManageSettings: false,
@@ -330,12 +330,12 @@ export const getMenuItemsForRole = (userRole) => {
       roles: ['admin', 'general_manager']
     },
     
-    // Recycle Bin - Admin only
+    // Recycle Bin - Admin and Head Micro Loan
     { 
       path: '/recycle-bin', 
       icon: 'fas fa-trash-restore', 
       label: 'Recycle Bin', 
-      roles: ['admin']
+      roles: ['admin', 'head_micro_loan']
     },
     
     // Notifications - All roles

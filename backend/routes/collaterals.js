@@ -1,7 +1,7 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 const upload = require('../middleware/upload');
 const path = require('path');
 const fs = require('fs');
@@ -229,7 +229,7 @@ router.put('/:id', upload.array('documents', 10), [
 });
 
 // Delete collateral
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authorize('admin', 'head_micro_loan'), async (req, res) => {
   try {
     const collateral = await db.Collateral.findByPk(req.params.id);
     if (!collateral) {

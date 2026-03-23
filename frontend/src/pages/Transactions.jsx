@@ -8,6 +8,7 @@ import { APPROVER_ROLES } from '../utils/permissions';
 
 const Transactions = () => {
   const { user } = useAuth();
+  const canDeleteTransaction = ['admin', 'head_micro_loan'].includes(user?.role);
   const printRef = useRef(null);
   const [transactions, setTransactions] = useState([]);
   const [clients, setClients] = useState([]);
@@ -495,13 +496,15 @@ const Transactions = () => {
                                 >
                                   <i className="fas fa-edit"></i>
                                 </button>
-                                <button
-                                  className="btn btn-sm btn-outline-danger"
-                                  onClick={() => handleDelete(transaction.id)}
-                                  title="Delete"
-                                >
-                                  <i className="fas fa-trash"></i>
-                                </button>
+                                {canDeleteTransaction && (
+                                  <button
+                                    className="btn btn-sm btn-outline-danger"
+                                    onClick={() => handleDelete(transaction.id)}
+                                    title="Delete"
+                                  >
+                                    <i className="fas fa-trash"></i>
+                                  </button>
+                                )}
                               </>
                             )}
                             <button

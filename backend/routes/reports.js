@@ -4,7 +4,6 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { Op } = require('sequelize');
 
 const router = express.Router();
-const sequelize = db.sequelize;
 
 router.use(authenticate);
 router.use(authorize('admin', 'general_manager', 'branch_manager', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance'));
@@ -31,10 +30,21 @@ router.get('/financial', async (req, res) => {
 // outstanding dues, total dues paid, penalty. Filters: from, to, currency (LRD, USD, ALL), search by name.
 router.get('/clients', async (req, res) => {
   try {
-    const { from, to, month, currency = 'ALL', search } = req.query;
+    const {
+      from,
+      to,
+      from_datetime,
+      to_datetime,
+      month,
+      currency = 'ALL',
+      search,
+      transaction_type,
+      sort_by = 'last_transaction_date',
+      sort_order = 'desc',
+      include_empty = 'false'
+    } = req.query;
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.max(1, parseInt(req.query.limit, 10) || 20);
-    const offset = (page - 1) * limit;
     const branchId = req.user?.branch_id || null;
     const userRole = req.user?.role || 'user';
 
@@ -62,6 +72,12 @@ router.get('/clients', async (req, res) => {
     const monthStr = month && String(month).trim().match(/^\d{4}-\d{2}$/) ? String(month).trim() : null;
     const fromStr = from && String(from).trim().match(/^\d{4}-\d{2}-\d{2}/) ? String(from).trim().slice(0, 10) : null;
     const toStr = to && String(to).trim().match(/^\d{4}-\d{2}-\d{2}/) ? String(to).trim().slice(0, 10) : null;
+    const fromDateTimeStr = from_datetime && String(from_datetime).trim()
+      ? String(from_datetime).trim()
+      : (fromStr ? `${fromStr}T00:00:00` : null);
+    const toDateTimeStr = to_datetime && String(to_datetime).trim()
+      ? String(to_datetime).trim()
+      : (toStr ? `${toStr}T23:59:59.999` : null);
 
     let fromDate;
     let toDate;
@@ -70,37 +86,34 @@ router.get('/clients', async (req, res) => {
       fromDate = new Date(y, m - 1, 1, 0, 0, 0, 0);
       toDate = new Date(y, m, 0, 23, 59, 59, 999);
     } else {
-      fromDate = fromStr ? new Date(fromStr + 'T00:00:00') : new Date(0);
-      toDate = toStr ? new Date(toStr + 'T23:59:59.999') : new Date();
+      fromDate = fromDateTimeStr ? new Date(fromDateTimeStr) : new Date(0);
+      toDate = toDateTimeStr ? new Date(toDateTimeStr) : new Date();
     }
     if (isNaN(fromDate.getTime())) fromDate = new Date(0);
     if (isNaN(toDate.getTime())) toDate = new Date();
-    if (fromDate > toDate && fromStr && toStr && !monthStr) {
+    if (fromDate > toDate && !monthStr) {
       const swap = fromDate;
       fromDate = toDate;
       toDate = swap;
     }
-    const fromNorm = fromDate.toISOString().slice(0, 10);
-    const toNorm = toDate.toISOString().slice(0, 10);
+    const fromNorm = fromDate.toISOString();
+    const toNorm = toDate.toISOString();
 
-    // Filter transactions by period: use date-only comparison for real-time data
-    const transactionDateWhere = {
-      status: 'completed'
-    };
-    if (monthStr || (fromStr && toStr)) {
-      const dateCol = sequelize.cast(sequelize.col('transaction_date'), 'DATE');
-      transactionDateWhere[Op.and] = [
-        sequelize.where(dateCol, { [Op.gte]: fromNorm }),
-        sequelize.where(dateCol, { [Op.lte]: toNorm })
-      ];
-    }
+    const requestedTxnTypes = String(transaction_type || '')
+      .split(',')
+      .map(t => t.trim())
+      .filter(Boolean);
+    const allowedTxnTypes = ['deposit', 'withdrawal', 'due_payment', 'loan_payment', 'personal_interest_payment', 'general_interest', 'penalty', 'fee'];
+    const txnTypes = requestedTxnTypes.length > 0
+      ? requestedTxnTypes.filter(t => allowedTxnTypes.includes(t))
+      : [];
 
-    const { count: totalClients, rows: clients } = await db.Client.findAndCountAll({
+    const includeEmptyClients = String(include_empty).toLowerCase() === 'true';
+
+    const clients = await db.Client.findAll({
       where: clientWhere,
       attributes: ['id', 'client_number', 'first_name', 'last_name', 'total_dues', 'dues_currency'],
-      order: [['client_number', 'ASC']],
-      limit,
-      offset
+      order: [['client_number', 'ASC']]
     });
 
     const clientIds = clients.map(c => c.id);
@@ -113,11 +126,13 @@ router.get('/clients', async (req, res) => {
           month: monthStr,
           from: fromNorm,
           to: toNorm,
+          sort_by: sort_by || 'last_transaction_date',
+          sort_order: sort_order || 'desc',
           pagination: {
-            total: totalClients || 0,
+            total: 0,
             page,
             limit,
-            pages: Math.max(1, Math.ceil((totalClients || 0) / limit))
+            pages: 1
           }
         }
       });
@@ -135,7 +150,9 @@ router.get('/clients', async (req, res) => {
       db.Transaction.findAll({
         where: {
           client_id: { [Op.in]: clientIds },
-          ...transactionDateWhere
+          status: 'completed',
+          transaction_date: { [Op.between]: [fromDate, toDate] },
+          ...(txnTypes.length > 0 ? { type: { [Op.in]: txnTypes } } : {})
         },
         attributes: ['client_id', 'type', 'currency', 'amount', 'transaction_date'],
         order: [['transaction_date', 'ASC']]
@@ -188,6 +205,21 @@ router.get('/clients', async (req, res) => {
         'currency',
         'amount'
       );
+      const deposits = sumByCurrency(
+        txList.filter(t => t.type === 'deposit'),
+        'currency',
+        'amount'
+      );
+      const withdrawals = sumByCurrency(
+        txList.filter(t => t.type === 'withdrawal'),
+        'currency',
+        'amount'
+      );
+      const duePayments = sumByCurrency(
+        txList.filter(t => t.type === 'due_payment'),
+        'currency',
+        'amount'
+      );
       const personalInterest = sumByCurrency(
         txList.filter(t => t.type === 'personal_interest_payment'),
         'currency',
@@ -224,6 +256,9 @@ router.get('/clients', async (req, res) => {
         amount: parseFloat(t.amount || 0),
         currency: t.currency || 'USD'
       }));
+      const firstTransactionDate = transactionsInPeriod.length > 0
+        ? transactionsInPeriod[0].transaction_date
+        : null;
       const lastTransactionDate = transactionsInPeriod.length > 0
         ? transactionsInPeriod[transactionsInPeriod.length - 1].transaction_date
         : null;
@@ -234,8 +269,14 @@ router.get('/clients', async (req, res) => {
           client_number: client.client_number,
           savings_id: savingsIds,
           name,
+          transaction_count: transactionsInPeriod.length,
+          first_transaction_date: firstTransactionDate,
           last_transaction_date: lastTransactionDate,
           transactions: transactionsInPeriod,
+          total_deposits: deposits.lrd,
+          total_withdrawals: withdrawals.lrd,
+          total_due_payments: duePayments.lrd,
+          total_loan_payments: loanRepaymentInPeriod.lrd,
           total_savings: totalSavings.lrd,
           personal_interest: personalInterest.lrd,
           general_interest: generalInterest.lrd,
@@ -253,8 +294,14 @@ router.get('/clients', async (req, res) => {
           client_number: client.client_number,
           savings_id: savingsIds,
           name,
+          transaction_count: transactionsInPeriod.length,
+          first_transaction_date: firstTransactionDate,
           last_transaction_date: lastTransactionDate,
           transactions: transactionsInPeriod,
+          total_deposits: deposits.usd,
+          total_withdrawals: withdrawals.usd,
+          total_due_payments: duePayments.usd,
+          total_loan_payments: loanRepaymentInPeriod.usd,
           total_savings: totalSavings.usd,
           personal_interest: personalInterest.usd,
           general_interest: generalInterest.usd,
@@ -271,8 +318,18 @@ router.get('/clients', async (req, res) => {
         client_number: client.client_number,
         savings_id: savingsIds,
         name,
+        transaction_count: transactionsInPeriod.length,
+        first_transaction_date: firstTransactionDate,
         last_transaction_date: lastTransactionDate,
         transactions: transactionsInPeriod,
+        total_deposits_lrd: deposits.lrd,
+        total_deposits_usd: deposits.usd,
+        total_withdrawals_lrd: withdrawals.lrd,
+        total_withdrawals_usd: withdrawals.usd,
+        total_due_payments_lrd: duePayments.lrd,
+        total_due_payments_usd: duePayments.usd,
+        total_loan_payments_lrd: loanRepaymentInPeriod.lrd,
+        total_loan_payments_usd: loanRepaymentInPeriod.usd,
         total_savings_lrd: totalSavings.lrd,
         total_savings_usd: totalSavings.usd,
         personal_interest_lrd: personalInterest.lrd,
@@ -293,14 +350,60 @@ router.get('/clients', async (req, res) => {
       };
     });
 
+    const filteredClients = includeEmptyClients
+      ? clientsData
+      : clientsData.filter(c => (c.transaction_count || 0) > 0);
+
+    const sortDir = String(sort_order).toLowerCase() === 'asc' ? 1 : -1;
+    const sortKey = String(sort_by || 'last_transaction_date').toLowerCase();
+    const sortedClients = [...filteredClients].sort((a, b) => {
+      const getVal = (row) => {
+        if (sortKey === 'name') return String(row.name || '').toLowerCase();
+        if (sortKey === 'client_number') return String(row.client_number || '');
+        if (sortKey === 'transaction_count') return Number(row.transaction_count || 0);
+        if (sortKey === 'last_transaction_date') return row.last_transaction_date ? new Date(row.last_transaction_date).getTime() : 0;
+        if (sortKey === 'first_transaction_date') return row.first_transaction_date ? new Date(row.first_transaction_date).getTime() : 0;
+
+        if (currency === 'ALL') {
+          if (sortKey === 'total_deposits') return Number(row.total_deposits_lrd || 0) + Number(row.total_deposits_usd || 0);
+          if (sortKey === 'total_withdrawals') return Number(row.total_withdrawals_lrd || 0) + Number(row.total_withdrawals_usd || 0);
+          if (sortKey === 'total_due_payments') return Number(row.total_due_payments_lrd || 0) + Number(row.total_due_payments_usd || 0);
+          if (sortKey === 'total_loan_payments') return Number(row.total_loan_payments_lrd || 0) + Number(row.total_loan_payments_usd || 0);
+          if (sortKey === 'total_savings') return Number(row.total_savings_lrd || 0) + Number(row.total_savings_usd || 0);
+          return Number(row.total_loan_payments_lrd || 0) + Number(row.total_loan_payments_usd || 0);
+        }
+
+        if (sortKey === 'total_deposits') return Number(row.total_deposits || 0);
+        if (sortKey === 'total_withdrawals') return Number(row.total_withdrawals || 0);
+        if (sortKey === 'total_due_payments') return Number(row.total_due_payments || 0);
+        if (sortKey === 'total_loan_payments') return Number(row.total_loan_payments || 0);
+        if (sortKey === 'total_savings') return Number(row.total_savings || 0);
+        return Number(row.total_loan_payments || 0);
+      };
+
+      const av = getVal(a);
+      const bv = getVal(b);
+      if (typeof av === 'string' || typeof bv === 'string') {
+        return sortDir * String(av).localeCompare(String(bv));
+      }
+      return sortDir * ((av || 0) - (bv || 0));
+    });
+
+    const totalClients = sortedClients.length;
+    const start = (page - 1) * limit;
+    const end = start + limit;
+    const pagedClients = sortedClients.slice(start, end);
+
     res.json({
       success: true,
       data: {
-        clients: clientsData,
+        clients: pagedClients,
         currency: currency || 'ALL',
         month: monthStr,
         from: fromNorm,
         to: toNorm,
+        sort_by: sortKey,
+        sort_order: sortDir === 1 ? 'asc' : 'desc',
         pagination: {
           total: totalClients || 0,
           page,

@@ -618,7 +618,7 @@ router.put('/:id', [
 });
 
 // Delete transaction (soft delete) and related revenue
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authorize('admin', 'head_micro_loan'), async (req, res) => {
   const dbTransaction = await db.sequelize.transaction();
   try {
     const transaction = await db.Transaction.findByPk(req.params.id, { transaction: dbTransaction });

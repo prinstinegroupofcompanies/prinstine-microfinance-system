@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const Collaterals = () => {
   const { user } = useAuth();
+  const canDeleteCollateral = ['admin', 'head_micro_loan'].includes(user?.role);
   const [collaterals, setCollaterals] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -224,13 +225,15 @@ const Collaterals = () => {
                             >
                               <i className="fas fa-edit"></i>
                             </button>
-                            <button
-                              className="btn btn-sm btn-outline-danger"
-                              onClick={() => handleDelete(collateral.id)}
-                              title="Delete"
-                            >
-                              <i className="fas fa-trash"></i>
-                            </button>
+                            {canDeleteCollateral && (
+                              <button
+                                className="btn btn-sm btn-outline-danger"
+                                onClick={() => handleDelete(collateral.id)}
+                                title="Delete"
+                              >
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

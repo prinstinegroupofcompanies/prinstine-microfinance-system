@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const KYC = () => {
   const { user } = useAuth();
+  const canDeleteKyc = ['admin', 'head_micro_loan'].includes(user?.role);
   const [documents, setDocuments] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -243,13 +244,15 @@ const KYC = () => {
                                 </button>
                               </>
                             )}
-                            <button
-                              className="btn btn-sm btn-outline-danger"
-                              onClick={() => handleDelete(doc.id)}
-                              title="Delete"
-                            >
-                              <i className="fas fa-trash"></i>
-                            </button>
+                            {canDeleteKyc && (
+                              <button
+                                className="btn btn-sm btn-outline-danger"
+                                onClick={() => handleDelete(doc.id)}
+                                title="Delete"
+                              >
+                                <i className="fas fa-trash"></i>
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

@@ -140,7 +140,12 @@ const Reports = () => {
     return d.toISOString().slice(0, 10);
   });
   const [clientReportsTo, setClientReportsTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [clientReportsFromTime, setClientReportsFromTime] = useState('00:00');
+  const [clientReportsToTime, setClientReportsToTime] = useState('23:59');
   const [clientReportsSearch, setClientReportsSearch] = useState('');
+  const [clientReportsTxnFocus, setClientReportsTxnFocus] = useState('core');
+  const [clientReportsSortBy, setClientReportsSortBy] = useState('last_transaction_date');
+  const [clientReportsSortOrder, setClientReportsSortOrder] = useState('desc');
   const [clientReportsExpandedId, setClientReportsExpandedId] = useState(null);
   const [clientReportsPage, setClientReportsPage] = useState(1);
   const [clientReportsRowsPerPage, setClientReportsRowsPerPage] = useState(20);
@@ -164,11 +169,27 @@ const Reports = () => {
       } else {
         params.set('from', from);
         params.set('to', to);
+        params.set('from_datetime', `${from}T${clientReportsFromTime || '00:00'}:00`);
+        params.set('to_datetime', `${to}T${clientReportsToTime || '23:59'}:59`);
       }
       params.set('page', String(clientReportsPage));
       params.set('limit', String(clientReportsRowsPerPage));
       if (clientReportsCurrency) params.set('currency', clientReportsCurrency);
       if (clientReportsSearch.trim()) params.set('search', clientReportsSearch.trim());
+      const txnTypeMap = {
+        all: '',
+        core: 'deposit,withdrawal,due_payment,loan_payment',
+        deposit: 'deposit',
+        withdrawal: 'withdrawal',
+        due_payment: 'due_payment',
+        loan_payment: 'loan_payment'
+      };
+      if (txnTypeMap[clientReportsTxnFocus]) {
+        params.set('transaction_type', txnTypeMap[clientReportsTxnFocus]);
+      }
+      params.set('sort_by', clientReportsSortBy);
+      params.set('sort_order', clientReportsSortOrder);
+      params.set('include_empty', 'false');
       const res = await apiClient.get(`/api/reports/clients?${params.toString()}`);
       setClientReportsList(res.data?.data?.clients ?? []);
       setClientReportsPagination(res.data?.data?.pagination || { total: 0, page: clientReportsPage, limit: clientReportsRowsPerPage, pages: 1 });
@@ -180,7 +201,20 @@ const Reports = () => {
     } finally {
       setClientReportsLoading(false);
     }
-  }, [clientReportsFrom, clientReportsTo, clientReportsMonth, clientReportsCurrency, clientReportsSearch, clientReportsPage, clientReportsRowsPerPage]);
+  }, [
+    clientReportsFrom,
+    clientReportsTo,
+    clientReportsFromTime,
+    clientReportsToTime,
+    clientReportsMonth,
+    clientReportsCurrency,
+    clientReportsSearch,
+    clientReportsTxnFocus,
+    clientReportsSortBy,
+    clientReportsSortOrder,
+    clientReportsPage,
+    clientReportsRowsPerPage
+  ]);
 
   useEffect(() => {
     if (reportType === 'clients') {
@@ -228,7 +262,19 @@ const Reports = () => {
       setClientReportsPage(1);
     }, 300);
     return () => clearTimeout(timer);
-  }, [reportType, clientReportsFrom, clientReportsTo, clientReportsMonth, clientReportsCurrency, clientReportsSearch]);
+  }, [
+    reportType,
+    clientReportsFrom,
+    clientReportsTo,
+    clientReportsFromTime,
+    clientReportsToTime,
+    clientReportsMonth,
+    clientReportsCurrency,
+    clientReportsSearch,
+    clientReportsTxnFocus,
+    clientReportsSortBy,
+    clientReportsSortOrder
+  ]);
 
   const clientReportsTotalPages = Math.max(1, clientReportsPagination.pages || 1);
   const clientReportsStartPage = Math.max(1, clientReportsPage - 2);
@@ -1498,10 +1544,10 @@ const Reports = () => {
             {/* Period and help text */}
             <div className="mb-3">
               <span className="text-muted small me-2">
-                <strong>Period:</strong> {clientReportsMonth ? clientReportsMonth : `${clientReportsFrom || '—'} to ${clientReportsTo || '—'}`}
+                <strong>Period:</strong> {clientReportsMonth ? clientReportsMonth : `${clientReportsFrom || '—'} ${clientReportsFromTime || '00:00'} to ${clientReportsTo || '—'} ${clientReportsToTime || '23:59'}`}
               </span>
               <span className="text-muted small d-block mt-1">
-                Loan repayment, personal/general interest, dues paid and penalty are for this period; savings and outstanding loan/dues are current.
+                Client list is transaction-sensitive: only clients with selected transaction activity in the selected time window are shown.
               </span>
             </div>
             {/* Filters */}
@@ -1562,6 +1608,26 @@ const Reports = () => {
                 />
               </div>
               <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">From Time</label>
+                <input
+                  type="time"
+                  className="form-control form-control-sm"
+                  value={clientReportsFromTime}
+                  onChange={(e) => setClientReportsFromTime(e.target.value)}
+                  disabled={!!clientReportsMonth}
+                />
+              </div>
+              <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">To Time</label>
+                <input
+                  type="time"
+                  className="form-control form-control-sm"
+                  value={clientReportsToTime}
+                  onChange={(e) => setClientReportsToTime(e.target.value)}
+                  disabled={!!clientReportsMonth}
+                />
+              </div>
+              <div className="col-md-6 col-lg-2">
                 <label className="form-label small text-muted">Currency</label>
                 <select
                   className="form-select form-select-sm"
@@ -1571,6 +1637,50 @@ const Reports = () => {
                   <option value="ALL">ALL</option>
                   <option value="LRD">LRD</option>
                   <option value="USD">USD</option>
+                </select>
+              </div>
+              <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">Transaction Focus</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={clientReportsTxnFocus}
+                  onChange={(e) => setClientReportsTxnFocus(e.target.value)}
+                >
+                  <option value="core">Core (Deposit/Withdrawal/Dues/Payments)</option>
+                  <option value="all">All Types</option>
+                  <option value="deposit">Deposits Only</option>
+                  <option value="withdrawal">Withdrawals Only</option>
+                  <option value="due_payment">Dues Payments Only</option>
+                  <option value="loan_payment">Loan Payments Only</option>
+                </select>
+              </div>
+              <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">Sort By</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={clientReportsSortBy}
+                  onChange={(e) => setClientReportsSortBy(e.target.value)}
+                >
+                  <option value="last_transaction_date">Last Txn Date</option>
+                  <option value="first_transaction_date">First Txn Date</option>
+                  <option value="transaction_count">Transaction Count</option>
+                  <option value="total_deposits">Total Deposits</option>
+                  <option value="total_withdrawals">Total Withdrawals</option>
+                  <option value="total_due_payments">Total Dues Paid</option>
+                  <option value="total_loan_payments">Total Loan Payments</option>
+                  <option value="name">Client Name</option>
+                  <option value="client_number">Client ID</option>
+                </select>
+              </div>
+              <div className="col-md-6 col-lg-2">
+                <label className="form-label small text-muted">Order</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={clientReportsSortOrder}
+                  onChange={(e) => setClientReportsSortOrder(e.target.value)}
+                >
+                  <option value="desc">Descending</option>
+                  <option value="asc">Ascending</option>
                 </select>
               </div>
               <div className="col-md-6 col-lg-2">

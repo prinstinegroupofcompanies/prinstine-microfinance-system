@@ -29,6 +29,8 @@ const Loans = () => {
   });
   const [receipt, setReceipt] = useState(null);
   const [loanTypes, setLoanTypes] = useState({});
+  const DELETE_LOAN_ROLES = ['admin', 'head_micro_loan'];
+  const DISBURSE_LOAN_ROLES = ['admin', 'head_micro_loan', 'branch_manager', 'general_manager', 'finance'];
   const [formData, setFormData] = useState({
     client_id: '',
     amount: '',
@@ -384,7 +386,7 @@ const Loans = () => {
       toast.success('Loan disbursed successfully!');
       fetchLoans();
     } catch (error) {
-      toast.error('Failed to disburse loan');
+      toast.error(error.response?.data?.message || 'Failed to disburse loan');
     }
   };
 
@@ -787,7 +789,7 @@ const Loans = () => {
                                 <i className="fas fa-check"></i>
                               </button>
                             )}
-                            {user?.role !== 'borrower' && loan.status === 'approved' && (
+                            {DISBURSE_LOAN_ROLES.includes(user?.role) && loan.status === 'approved' && (
                               <button
                                 className="btn btn-sm btn-outline-info"
                                 onClick={() => handleDisburse(loan.id)}
@@ -817,7 +819,7 @@ const Loans = () => {
                                 </button>
                               </>
                             )}
-                            {user?.role === 'admin' && (
+                            {DELETE_LOAN_ROLES.includes(user?.role) && (
                               <button
                                 className="btn btn-sm btn-outline-danger"
                                 onClick={() => handleDelete(loan.id)}

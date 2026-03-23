@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const LoanApplications = () => {
   const { user } = useAuth();
+  const canEditOrDeleteLoanApplication = ['admin', 'head_micro_loan'].includes(user?.role);
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -122,7 +123,7 @@ const LoanApplications = () => {
                             >
                               <i className="fas fa-eye"></i>
                             </Link>
-                            {user?.role !== 'borrower' && user?.role === 'admin' && (
+                            {user?.role !== 'borrower' && canEditOrDeleteLoanApplication && (
                               <button
                                 className="btn btn-sm btn-outline-primary"
                                 onClick={() => handleEdit(app.id)}
@@ -140,7 +141,7 @@ const LoanApplications = () => {
                                 <i className="fas fa-check"></i>
                               </button>
                             )}
-                            {user?.role === 'admin' && (
+                            {canEditOrDeleteLoanApplication && (
                               <button
                                 className="btn btn-sm btn-outline-danger"
                                 onClick={() => handleDelete(app.id)}

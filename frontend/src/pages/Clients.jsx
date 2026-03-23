@@ -8,6 +8,7 @@ import { exportToPDF, exportToExcel, formatDate, formatCurrency } from '../utils
 
 const Clients = () => {
   const { user } = useAuth();
+  const canDeleteClient = ['admin', 'head_micro_loan'].includes(user?.role);
   const [clients, setClients] = useState([]);
   const [branches, setBranches] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -397,7 +398,7 @@ const Clients = () => {
                           >
                             <i className="fas fa-edit"></i>
                           </button>
-                          {user?.role === 'admin' && (
+                          {canDeleteClient && (
                             <button
                               className="btn btn-sm btn-outline-danger"
                               onClick={() => handleDelete(client.id)}

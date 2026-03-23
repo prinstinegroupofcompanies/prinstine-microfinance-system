@@ -24,6 +24,8 @@ const LoanDetail = () => {
   const [clients, setClients] = useState([]);
   const [branches, setBranches] = useState([]);
   const [collaterals, setCollaterals] = useState([]);
+  const DISBURSE_LOAN_ROLES = ['admin', 'head_micro_loan', 'branch_manager', 'general_manager', 'finance'];
+  const DELETE_LOAN_ROLES = ['admin', 'head_micro_loan'];
 
   useEffect(() => {
     fetchLoan();
@@ -150,7 +152,7 @@ const LoanDetail = () => {
       toast.success('Loan disbursed successfully!');
       fetchLoan();
     } catch (error) {
-      toast.error('Failed to disburse loan');
+      toast.error(error.response?.data?.message || 'Failed to disburse loan');
     }
   };
 
@@ -385,7 +387,8 @@ const LoanDetail = () => {
     );
   }
 
-  const isAdmin = user?.role === 'admin';
+  const canDeleteLoan = DELETE_LOAN_ROLES.includes(user?.role);
+  const canDisburseLoan = DISBURSE_LOAN_ROLES.includes(user?.role);
   const canApproveLoan = APPROVER_ROLES.includes(user?.role);
   const schedule = loan.repayment_schedule 
     ? (typeof loan.repayment_schedule === 'string' ? JSON.parse(loan.repayment_schedule) : loan.repayment_schedule)
@@ -426,7 +429,7 @@ const LoanDetail = () => {
               <i className="fas fa-check me-2"></i>Approve
             </button>
           )}
-          {loan.status === 'approved' && (
+          {canDisburseLoan && loan.status === 'approved' && (
             <button
               className="btn btn-info me-2"
               onClick={handleDisburse}
@@ -434,7 +437,7 @@ const LoanDetail = () => {
               <i className="fas fa-money-bill-wave me-2"></i>Disburse
             </button>
           )}
-          {isAdmin && (
+          {canDeleteLoan && (
             <button
               className="btn btn-danger"
               onClick={handleDelete}

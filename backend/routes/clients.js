@@ -949,7 +949,7 @@ router.delete('/all', authenticate, authorize('admin'), async (req, res) => {
 });
 
 // Delete client (soft delete) and all financial records
-router.delete('/:id', authenticate, authorize('admin'), async (req, res) => {
+router.delete('/:id', authenticate, authorize('admin', 'head_micro_loan'), async (req, res) => {
   const transaction = await db.sequelize.transaction();
   try {
     const client = await db.Client.findByPk(req.params.id, { transaction });
