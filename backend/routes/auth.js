@@ -1,6 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const { Op } = require('sequelize');
 const db = require('../config/database');
@@ -8,13 +9,36 @@ const { authenticate } = require('../middleware/auth');
 
 const router = express.Router();
 
+// Production-safe limits for public auth endpoints
+const registerLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 10 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many signup attempts. Please try again later.'
+  }
+});
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: process.env.NODE_ENV === 'production' ? 30 : 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    success: false,
+    message: 'Too many login attempts. Please try again later.'
+  }
+});
+
 // Register
-router.post('/register', [
+router.post('/register', registerLimiter, [
   body('name').notEmpty().withMessage('Name is required'),
   body('email').isEmail().withMessage('Valid email is required'),
-  body('username').notEmpty().withMessage('Username is required'),
+  body('username').optional().isString(),
   body('password').isLength({ min: 6 }).withMessage('Password must be at least 6 characters'),
-  body('role').optional().isIn(['admin', 'general_manager', 'branch_manager', 'loan_officer', 'hr', 'borrower', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance', 'teller', 'customer_service', 'accountant'])
+  body('role').optional().equals('borrower').withMessage('Only borrower signup is allowed')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -22,17 +46,38 @@ router.post('/register', [
       return res.status(400).json({ success: false, errors: errors.array() });
     }
 
-    const { name, email, username, password, role, branch_id } = req.body;
+    const { name, email, password, role, branch_id } = req.body;
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const rawUsername = req.body.username ? String(req.body.username).trim().toLowerCase() : '';
+    let usernameBase = rawUsername || normalizedEmail.split('@')[0];
+    if (!usernameBase) usernameBase = 'user';
+    usernameBase = usernameBase.replace(/[^a-z0-9._-]/g, '').slice(0, 30) || 'user';
 
-    // Check if user exists
-    const existingUser = await db.User.findOne({
-      where: { [Op.or]: [{ email }, { username }] }
+    // Check if email already exists first
+    const existingByEmail = await db.User.findOne({
+      where: { email: normalizedEmail }
     });
 
-    if (existingUser) {
+    if (existingByEmail) {
       return res.status(400).json({
         success: false,
-        message: 'User with this email or username already exists'
+        message: 'User with this email already exists'
+      });
+    }
+
+    // Ensure username is unique by suffixing when needed
+    let username = usernameBase;
+    let counter = 1;
+    while (counter <= 1000) {
+      const existingByUsername = await db.User.findOne({ where: { username } });
+      if (!existingByUsername) break;
+      username = `${usernameBase}${counter}`;
+      counter += 1;
+    }
+    if (counter > 1000) {
+      return res.status(500).json({
+        success: false,
+        message: 'Could not generate unique username. Please try again.'
       });
     }
 
@@ -42,21 +87,48 @@ router.post('/register', [
     // Create user
     const user = await db.User.create({
       name,
-      email,
+      email: normalizedEmail,
       username,
       password: hashedPassword,
-      role: role || 'borrower',
-      branch_id: branch_id || null,
+      role: 'borrower',
+      branch_id: null,
       is_active: true,
       email_verified_at: new Date()
     });
 
     // If borrower, create a client record linked to this user so dashboard and records work
-    const effectiveRole = role || 'borrower';
+    const effectiveRole = 'borrower';
     if (effectiveRole === 'borrower') {
       try {
-        const clientCount = await db.Client.count();
-        const clientNumber = `CL${String(clientCount + 1).padStart(6, '0')}`;
+        // Generate unique client number (checks soft-deleted as well)
+        let clientNumber = null;
+        let seq = 1;
+        const lastClient = await db.Client.findOne({
+          attributes: ['client_number'],
+          order: [['id', 'DESC']],
+          paranoid: false
+        });
+        if (lastClient?.client_number) {
+          const num = parseInt(String(lastClient.client_number).replace(/\D/g, ''), 10) || 0;
+          seq = num + 1;
+        }
+        let attempts = 0;
+        while (attempts < 100 && !clientNumber) {
+          const candidate = `CL${String(seq).padStart(6, '0')}`;
+          const exists = await db.Client.findOne({
+            where: { client_number: candidate },
+            paranoid: false
+          });
+          if (!exists) {
+            clientNumber = candidate;
+            break;
+          }
+          seq++;
+          attempts++;
+        }
+        if (!clientNumber) {
+          clientNumber = `CL${String(Date.now()).slice(-6)}`;
+        }
         const nameParts = (name || '').trim().split(/\s+/);
         const firstName = nameParts[0] || name;
         const lastName = nameParts.slice(1).join(' ') || 'Client';
@@ -64,7 +136,7 @@ router.post('/register', [
           client_number: clientNumber,
           first_name: firstName,
           last_name: lastName,
-          email: email,
+          email: normalizedEmail,
           phone: null,
           status: 'active',
           kyc_status: 'pending',
@@ -108,7 +180,7 @@ router.post('/register', [
 });
 
 // Login
-router.post('/login', [
+router.post('/login', loginLimiter, [
   body('email').notEmpty().withMessage('Email is required').isEmail().withMessage('Valid email is required'),
   body('password').notEmpty().withMessage('Password is required')
 ], async (req, res) => {
