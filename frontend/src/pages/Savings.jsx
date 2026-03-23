@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../config/axios';
 import { toast } from 'react-toastify';
 import { Link } from 'react-router-dom';
@@ -41,20 +41,7 @@ const Savings = () => {
     purpose: ''
   });
 
-  useEffect(() => {
-    fetchSavings();
-  }, [currentPage, rowsPerPage]);
-
-  useEffect(() => {
-    fetchClients();
-    // Real-time updates every 10 seconds
-    const interval = setInterval(() => {
-      fetchSavings();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchSavings = async () => {
+  const fetchSavings = useCallback(async () => {
     try {
       const response = await apiClient.get('/api/savings', {
         params: { page: currentPage, limit: rowsPerPage }
@@ -67,7 +54,23 @@ const Savings = () => {
       toast.error('Failed to load savings accounts');
       setLoading(false);
     }
-  };
+  }, [currentPage, rowsPerPage]);
+
+  useEffect(() => {
+    fetchSavings();
+  }, [fetchSavings]);
+
+  useEffect(() => {
+    fetchClients();
+  }, []);
+
+  useEffect(() => {
+    // Real-time updates every 10 seconds, but keep current pagination state
+    const interval = setInterval(() => {
+      fetchSavings();
+    }, 10000);
+    return () => clearInterval(interval);
+  }, [fetchSavings]);
 
   const fetchClients = async () => {
     try {
@@ -283,6 +286,11 @@ const Savings = () => {
   useEffect(() => {
     if (currentPage > totalPages) setCurrentPage(totalPages);
   }, [currentPage, totalPages]);
+
+  useEffect(() => {
+    // Reset to first page when rows per page changes
+    setCurrentPage(1);
+  }, [rowsPerPage]);
 
   return (
     <div className="fade-in">
