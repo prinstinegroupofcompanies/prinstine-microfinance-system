@@ -47,6 +47,12 @@ const allowedOrigins = process.env.CORS_ORIGIN && !allowAllOrigins
   ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
   : ['http://localhost:3000', 'http://localhost:5000'];
 
+// Always allow known production frontend domains (independent of NODE_ENV).
+allowedOrigins.push('https://pgcmicrofinance.org');
+allowedOrigins.push('https://www.pgcmicrofinance.org');
+allowedOrigins.push('http://pgcmicrofinance.org');
+allowedOrigins.push('http://www.pgcmicrofinance.org');
+
 // Add Render URLs if in production
 if (process.env.NODE_ENV === 'production') {
   if (process.env.RENDER_EXTERNAL_URL) {
@@ -64,16 +70,13 @@ if (process.env.NODE_ENV === 'production') {
   if (process.env.FRONTEND_URL) {
     allowedOrigins.push(process.env.FRONTEND_URL);
   }
-  // Add pgcmicrofinance.org domain
-  allowedOrigins.push('https://pgcmicrofinance.org');
-  allowedOrigins.push('http://pgcmicrofinance.org');
   // Allow all Render domains in production (regex pattern)
   allowedOrigins.push(/^https:\/\/.*\.onrender\.com$/);
   // Allow custom domains (common patterns)
   // Note: This is a fallback - specific domains should be added via CUSTOM_DOMAIN env var
 }
 
-app.use(cors({
+const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
@@ -107,7 +110,11 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
   exposedHeaders: ['Content-Range', 'X-Content-Range']
-}));
+};
+
+app.use(cors(corsOptions));
+// Ensure preflight requests are handled for every route.
+app.options('*', cors(corsOptions));
 app.use(morgan('dev'));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
