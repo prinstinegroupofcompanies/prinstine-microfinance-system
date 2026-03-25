@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import apiClient from '../config/axios';
 import { toast } from 'react-toastify';
 import { useAuth } from '../contexts/AuthContext';
@@ -10,6 +10,7 @@ const Transactions = () => {
   const { user } = useAuth();
   const canDeleteTransaction = ['admin', 'head_micro_loan'].includes(user?.role);
   const printRef = useRef(null);
+  const fetchRequestIdRef = useRef(0);
   const [transactions, setTransactions] = useState([]);
   const [clients, setClients] = useState([]);
   const [loans, setLoans] = useState([]);
@@ -36,20 +37,25 @@ const Transactions = () => {
   });
 
   // Define all fetch functions before useEffect hooks
-  const fetchTransactions = async () => {
+  const fetchTransactions = useCallback(async () => {
+    const requestId = ++fetchRequestIdRef.current;
     try {
+      setLoading(true);
       const response = await apiClient.get('/api/transactions', {
         params: { page: currentPage, limit: rowsPerPage }
       });
+      if (requestId !== fetchRequestIdRef.current) return;
       setTransactions(response.data.data.transactions || []);
       setPagination(response.data.data.pagination || { total: 0, page: currentPage, limit: rowsPerPage, pages: 1 });
-      setLoading(false);
     } catch (error) {
+      if (requestId !== fetchRequestIdRef.current) return;
       console.error('Failed to fetch transactions:', error);
       toast.error('Failed to load transactions');
+    } finally {
+      if (requestId !== fetchRequestIdRef.current) return;
       setLoading(false);
     }
-  };
+  }, [currentPage, rowsPerPage]);
 
   const fetchClients = async () => {
     try {
@@ -87,11 +93,9 @@ const Transactions = () => {
     fetchLoans();
     fetchSavingsAccounts();
     // Real-time updates every 5 seconds
-    const interval = setInterval(() => {
-      fetchTransactions();
-    }, 5000);
+    const interval = setInterval(fetchTransactions, 5000);
     return () => clearInterval(interval);
-  }, []);
+  }, [fetchTransactions]);
 
   // Auto-set currency when loan or client is selected
   useEffect(() => {
