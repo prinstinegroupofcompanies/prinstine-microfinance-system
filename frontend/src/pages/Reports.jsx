@@ -128,12 +128,11 @@ const Reports = () => {
     }
   });
 
-  // Client reports: list with filters and real-time data
+  // Client reports: From/To, client filter, USD|LRD, sort, grand totals
   const [clientReportsList, setClientReportsList] = useState([]);
+  const [clientReportsGrandTotals, setClientReportsGrandTotals] = useState(null);
   const [clientReportsLoading, setClientReportsLoading] = useState(false);
-  const [clientReportsCurrency, setClientReportsCurrency] = useState('ALL');
-  const [clientReportsPreset, setClientReportsPreset] = useState('custom');
-  const [clientReportsMonth, setClientReportsMonth] = useState('');
+  const [clientReportsCurrency, setClientReportsCurrency] = useState('USD');
   const [clientReportsFrom, setClientReportsFrom] = useState(() => {
     const d = new Date();
     d.setMonth(d.getMonth() - 1);
@@ -142,17 +141,44 @@ const Reports = () => {
   const [clientReportsTo, setClientReportsTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [clientReportsFromTime, setClientReportsFromTime] = useState('00:00');
   const [clientReportsToTime, setClientReportsToTime] = useState('23:59');
-  const [clientReportsSearch, setClientReportsSearch] = useState('');
-  const [clientReportsTxnFocus, setClientReportsTxnFocus] = useState('core');
-  const [clientReportsSortBy, setClientReportsSortBy] = useState('last_transaction_date');
-  const [clientReportsSortOrder, setClientReportsSortOrder] = useState('desc');
-  const [clientReportsExpandedId, setClientReportsExpandedId] = useState(null);
+  const [clientReportsClientId, setClientReportsClientId] = useState('');
+  const [clientReportsClientsOptions, setClientReportsClientsOptions] = useState([]);
+  const [clientReportsSortBy, setClientReportsSortBy] = useState('client_number');
+  const [clientReportsSortOrder, setClientReportsSortOrder] = useState('asc');
   const [clientReportsPage, setClientReportsPage] = useState(1);
   const [clientReportsRowsPerPage, setClientReportsRowsPerPage] = useState(20);
   const [clientReportsPagination, setClientReportsPagination] = useState({ total: 0, page: 1, limit: 20, pages: 1 });
   const [revenuePage, setRevenuePage] = useState(1);
   const [revenueRowsPerPage, setRevenueRowsPerPage] = useState(20);
   const [revenuePagination, setRevenuePagination] = useState({ total: 0, page: 1, limit: 20, pages: 1 });
+
+  const buildClientReportsParams = useCallback((pageVal, limitVal) => {
+    const from = clientReportsFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    const to = clientReportsTo || new Date().toISOString().slice(0, 10);
+    const params = new URLSearchParams();
+    params.set('from', from);
+    params.set('to', to);
+    params.set('from_datetime', `${from}T${clientReportsFromTime || '00:00'}:00`);
+    params.set('to_datetime', `${to}T${clientReportsToTime || '23:59'}:59`);
+    params.set('page', String(pageVal));
+    params.set('limit', String(limitVal));
+    if (clientReportsCurrency) params.set('currency', clientReportsCurrency);
+    if (clientReportsClientId && String(clientReportsClientId).trim() !== '') {
+      params.set('client_id', String(clientReportsClientId).trim());
+    }
+    params.set('sort_by', clientReportsSortBy);
+    params.set('sort_order', clientReportsSortOrder);
+    return params;
+  }, [
+    clientReportsFrom,
+    clientReportsTo,
+    clientReportsFromTime,
+    clientReportsToTime,
+    clientReportsCurrency,
+    clientReportsClientId,
+    clientReportsSortBy,
+    clientReportsSortOrder
+  ]);
 
   const fetchClientReports = useCallback(async () => {
     const from = clientReportsFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
@@ -163,40 +189,18 @@ const Reports = () => {
     }
     setClientReportsLoading(true);
     try {
-      const params = new URLSearchParams();
-      if (clientReportsMonth) {
-        params.set('month', clientReportsMonth);
-      } else {
-        params.set('from', from);
-        params.set('to', to);
-        params.set('from_datetime', `${from}T${clientReportsFromTime || '00:00'}:00`);
-        params.set('to_datetime', `${to}T${clientReportsToTime || '23:59'}:59`);
-      }
-      params.set('page', String(clientReportsPage));
-      params.set('limit', String(clientReportsRowsPerPage));
-      if (clientReportsCurrency) params.set('currency', clientReportsCurrency);
-      if (clientReportsSearch.trim()) params.set('search', clientReportsSearch.trim());
-      const txnTypeMap = {
-        all: '',
-        core: 'deposit,withdrawal,due_payment,loan_payment',
-        deposit: 'deposit',
-        withdrawal: 'withdrawal',
-        due_payment: 'due_payment',
-        loan_payment: 'loan_payment'
-      };
-      if (txnTypeMap[clientReportsTxnFocus]) {
-        params.set('transaction_type', txnTypeMap[clientReportsTxnFocus]);
-      }
-      params.set('sort_by', clientReportsSortBy);
-      params.set('sort_order', clientReportsSortOrder);
-      params.set('include_empty', 'false');
+      const params = buildClientReportsParams(clientReportsPage, clientReportsRowsPerPage);
       const res = await apiClient.get(`/api/reports/clients?${params.toString()}`);
-      setClientReportsList(res.data?.data?.clients ?? []);
-      setClientReportsPagination(res.data?.data?.pagination || { total: 0, page: clientReportsPage, limit: clientReportsRowsPerPage, pages: 1 });
-      setClientReportsExpandedId(null);
+      const data = res.data?.data;
+      setClientReportsList(data?.clients ?? []);
+      setClientReportsGrandTotals(data?.grandTotals ?? null);
+      setClientReportsPagination(
+        data?.pagination || { total: 0, page: clientReportsPage, limit: clientReportsRowsPerPage, pages: 1 }
+      );
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to load client reports');
       setClientReportsList([]);
+      setClientReportsGrandTotals(null);
       setClientReportsPagination({ total: 0, page: 1, limit: clientReportsRowsPerPage, pages: 1 });
     } finally {
       setClientReportsLoading(false);
@@ -206,15 +210,77 @@ const Reports = () => {
     clientReportsTo,
     clientReportsFromTime,
     clientReportsToTime,
-    clientReportsMonth,
     clientReportsCurrency,
-    clientReportsSearch,
-    clientReportsTxnFocus,
+    clientReportsClientId,
     clientReportsSortBy,
     clientReportsSortOrder,
     clientReportsPage,
-    clientReportsRowsPerPage
+    clientReportsRowsPerPage,
+    buildClientReportsParams
   ]);
+
+  const exportClientReportsFull = useCallback(
+    async (kind) => {
+      const from = clientReportsFrom || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const to = clientReportsTo || new Date().toISOString().slice(0, 10);
+      if (from > to) {
+        toast.error('"From" date must be before or equal to "To" date.');
+        return;
+      }
+      const total = clientReportsPagination.total || 0;
+      if (total === 0) {
+        toast.warning('No data to export. Apply filters first.');
+        return;
+      }
+      const cur = clientReportsCurrency === 'LRD' ? 'LRD' : 'USD';
+      const columns = [
+        { key: 'client_number', header: 'ID', format: (v) => v ?? '-' },
+        { key: 'name', header: 'Client Name', format: (v) => v ?? '-' },
+        { key: 'deposits', header: 'Deposits', format: (v) => formatCurrency(v, cur) },
+        { key: 'interest_received', header: 'Interest Received', format: (v) => formatCurrency(v, cur) },
+        { key: 'dues_outstanding', header: 'Dues Outstanding', format: (v) => formatCurrency(v, cur) },
+        { key: 'penalty_fines', header: 'Penalty & Fines', format: (v) => formatCurrency(v, cur) },
+        { key: 'loan_outstanding', header: 'Loan Outstanding', format: (v) => formatCurrency(v, cur) },
+        { key: 'total_take_home', header: 'Total Take Home', format: (v) => formatCurrency(v, cur) }
+      ];
+      try {
+        const params = buildClientReportsParams(1, Math.max(total, 1));
+        const res = await apiClient.get(`/api/reports/clients?${params.toString()}`);
+        const rows = res.data?.data?.clients ?? [];
+        const gt = res.data?.data?.grandTotals;
+        const exportRows = [...rows];
+        if (gt) {
+          exportRows.push({
+            id: 'grand-total',
+            client_number: '—',
+            name: 'Grand Total',
+            deposits: gt.deposits,
+            interest_received: gt.interest_received,
+            dues_outstanding: gt.dues_outstanding,
+            penalty_fines: gt.penalty_fines,
+            loan_outstanding: gt.loan_outstanding,
+            total_take_home: gt.total_take_home
+          });
+        }
+        if (kind === 'excel') {
+          exportToExcel(exportRows, columns, 'Client Reports', 'client_reports');
+          toast.success('Exported to Excel');
+        } else {
+          exportToPDF(exportRows, columns, 'Client Reports', 'client_reports');
+          toast.success('Exported to PDF');
+        }
+      } catch (err) {
+        toast.error(err.response?.data?.message || 'Export failed');
+      }
+    },
+    [
+      buildClientReportsParams,
+      clientReportsFrom,
+      clientReportsTo,
+      clientReportsPagination.total,
+      clientReportsCurrency
+    ]
+  );
 
   useEffect(() => {
     if (reportType === 'clients') {
@@ -228,53 +294,37 @@ const Reports = () => {
     }
   }, [reportType, revenuePage, revenueRowsPerPage]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (reportType !== 'clients') return;
-    if (clientReportsPreset === 'custom') return;
-    const now = new Date();
-    let fromDate = new Date(now);
-
-    if (clientReportsPreset === 'this_month') {
-      fromDate = new Date(now.getFullYear(), now.getMonth(), 1);
-    } else if (clientReportsPreset === 'last_month') {
-      const startLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      const endLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
-      setClientReportsFrom(startLastMonth.toISOString().slice(0, 10));
-      setClientReportsTo(endLastMonth.toISOString().slice(0, 10));
-      setClientReportsMonth('');
-      return;
-    } else if (clientReportsPreset === 'last_7_days') {
-      fromDate.setDate(now.getDate() - 6);
-    } else if (clientReportsPreset === 'last_30_days') {
-      fromDate.setDate(now.getDate() - 29);
-    } else if (clientReportsPreset === 'this_year') {
-      fromDate = new Date(now.getFullYear(), 0, 1);
-    }
-
-    setClientReportsFrom(fromDate.toISOString().slice(0, 10));
-    setClientReportsTo(now.toISOString().slice(0, 10));
-    setClientReportsMonth('');
-  }, [reportType, clientReportsPreset]);
-
-  useEffect(() => {
-    if (reportType !== 'clients') return;
-    const timer = setTimeout(() => {
-      setClientReportsPage(1);
-    }, 300);
-    return () => clearTimeout(timer);
+    setClientReportsPage(1);
   }, [
     reportType,
     clientReportsFrom,
     clientReportsTo,
     clientReportsFromTime,
     clientReportsToTime,
-    clientReportsMonth,
     clientReportsCurrency,
-    clientReportsSearch,
-    clientReportsTxnFocus,
+    clientReportsClientId,
     clientReportsSortBy,
     clientReportsSortOrder
   ]);
+
+  useEffect(() => {
+    if (reportType !== 'clients') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiClient.get('/api/clients', { params: { limit: 10000, page: 1 } });
+        const list = res.data?.data?.clients ?? [];
+        if (!cancelled) setClientReportsClientsOptions(Array.isArray(list) ? list : []);
+      } catch {
+        if (!cancelled) setClientReportsClientsOptions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [reportType]);
 
   const clientReportsTotalPages = Math.max(1, clientReportsPagination.pages || 1);
   const clientReportsStartPage = Math.max(1, clientReportsPage - 2);
@@ -300,13 +350,6 @@ const Reports = () => {
       setRevenuePage(revenueTotalPages);
     }
   }, [revenuePage, revenueTotalPages]);
-
-  useEffect(() => {
-    // Collapse expanded row if that client is not on current page
-    if (!clientReportsExpandedId) return;
-    const visible = clientReportsList.some(c => c.id === clientReportsExpandedId);
-    if (!visible) setClientReportsExpandedId(null);
-  }, [clientReportsExpandedId, clientReportsList]);
 
   // Real-time: refetch client reports every 30s when on clients tab
   useEffect(() => {
@@ -1415,7 +1458,7 @@ const Reports = () => {
         </div>
       )}
 
-      {/* Client Reports */}
+      {/* Client Reports — financial summary by currency */}
       {reportType === 'clients' && (
         <div className="card">
           <div className="card-header d-flex flex-wrap align-items-center justify-content-between gap-2">
@@ -1424,108 +1467,18 @@ const Reports = () => {
               <button
                 type="button"
                 className="btn btn-sm btn-success"
-                onClick={() => {
-                  if (clientReportsList.length === 0) {
-                    toast.warning('No data to export. Apply filters and load client reports first.');
-                    return;
-                  }
-                  const isAll = clientReportsCurrency === 'ALL';
-                  const columns = [
-                    { key: 'client_number', header: 'ID#', format: (v, row) => v ?? row.id ?? '-' },
-                    { key: 'last_transaction_date', header: 'Last Txn Date', format: (v) => (v ? new Date(v).toLocaleDateString() : '-') },
-                    { key: 'savings_id', header: 'Savings ID#', format: (v) => v ?? '-' },
-                    { key: 'name', header: 'Name', format: (v) => v ?? '-' },
-                    ...(isAll
-                      ? [
-                          { key: 'total_savings_lrd', header: 'Total Savings (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'total_savings_usd', header: 'Total Savings (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'personal_interest_lrd', header: 'Personal Interest (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'personal_interest_usd', header: 'Personal Interest (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'general_interest_lrd', header: 'General Interest (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'general_interest_usd', header: 'General Interest (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'outstanding_loan_lrd', header: 'Outstanding Loan (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'outstanding_loan_usd', header: 'Outstanding Loan (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'loan_repayment_done_lrd', header: 'Loan Repayment Done (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'loan_repayment_done_usd', header: 'Loan Repayment Done (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'loan_status', header: 'Loan Status' },
-                          { key: 'outstanding_dues_lrd', header: 'Outstanding Dues (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'outstanding_dues_usd', header: 'Outstanding Dues (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'total_dues_paid_lrd', header: 'Total Dues Paid (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'total_dues_paid_usd', header: 'Total Dues Paid (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'penalty_lrd', header: 'Penalty (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'penalty_usd', header: 'Penalty (USD)', format: (v) => formatCurrency(v, 'USD') }
-                        ]
-                      : [
-                          { key: 'total_savings', header: 'Total Savings', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'personal_interest', header: 'Personal Interest', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'general_interest', header: 'General Interest', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'outstanding_loan', header: 'Outstanding Loan', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'loan_repayment_done', header: 'Loan Repayment Done', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'loan_status', header: 'Loan Status' },
-                          { key: 'outstanding_dues', header: 'Outstanding Dues', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'total_dues_paid', header: 'Total Dues Paid', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'penalty', header: 'Penalty', format: (v) => formatCurrency(v, clientReportsCurrency) }
-                        ])
-                  ];
-                  exportToExcel(clientReportsList, columns, 'Client Reports', 'client_reports');
-                  toast.success('Client reports exported to Excel');
-                }}
-                disabled={clientReportsList.length === 0}
-                title="Export to Excel"
+                onClick={() => exportClientReportsFull('excel')}
+                disabled={clientReportsLoading || (clientReportsPagination.total || 0) === 0}
+                title="Export all rows matching filters to Excel"
               >
                 <i className="fas fa-file-excel me-1"></i>Export Excel
               </button>
               <button
                 type="button"
                 className="btn btn-sm btn-danger"
-                onClick={() => {
-                  if (clientReportsList.length === 0) {
-                    toast.warning('No data to export. Apply filters and load client reports first.');
-                    return;
-                  }
-                  const isAll = clientReportsCurrency === 'ALL';
-                  const columns = [
-                    { key: 'client_number', header: 'ID#', format: (v, row) => v ?? row.id ?? '-' },
-                    { key: 'last_transaction_date', header: 'Last Txn Date', format: (v) => (v ? new Date(v).toLocaleDateString() : '-') },
-                    { key: 'savings_id', header: 'Savings ID#', format: (v) => v ?? '-' },
-                    { key: 'name', header: 'Name', format: (v) => v ?? '-' },
-                    ...(isAll
-                      ? [
-                          { key: 'total_savings_lrd', header: 'Total Savings (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'total_savings_usd', header: 'Total Savings (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'personal_interest_lrd', header: 'Personal Interest (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'personal_interest_usd', header: 'Personal Interest (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'general_interest_lrd', header: 'General Interest (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'general_interest_usd', header: 'General Interest (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'outstanding_loan_lrd', header: 'Outstanding Loan (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'outstanding_loan_usd', header: 'Outstanding Loan (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'loan_repayment_done_lrd', header: 'Loan Repayment Done (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'loan_repayment_done_usd', header: 'Loan Repayment Done (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'loan_status', header: 'Loan Status' },
-                          { key: 'outstanding_dues_lrd', header: 'Outstanding Dues (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'outstanding_dues_usd', header: 'Outstanding Dues (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'total_dues_paid_lrd', header: 'Total Dues Paid (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'total_dues_paid_usd', header: 'Total Dues Paid (USD)', format: (v) => formatCurrency(v, 'USD') },
-                          { key: 'penalty_lrd', header: 'Penalty (LRD)', format: (v) => formatCurrency(v, 'LRD') },
-                          { key: 'penalty_usd', header: 'Penalty (USD)', format: (v) => formatCurrency(v, 'USD') }
-                        ]
-                      : [
-                          { key: 'total_savings', header: 'Total Savings', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'personal_interest', header: 'Personal Interest', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'general_interest', header: 'General Interest', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'outstanding_loan', header: 'Outstanding Loan', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'loan_repayment_done', header: 'Loan Repayment Done', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'loan_status', header: 'Loan Status' },
-                          { key: 'outstanding_dues', header: 'Outstanding Dues', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'total_dues_paid', header: 'Total Dues Paid', format: (v) => formatCurrency(v, clientReportsCurrency) },
-                          { key: 'penalty', header: 'Penalty', format: (v) => formatCurrency(v, clientReportsCurrency) }
-                        ])
-                  ];
-                  exportToPDF(clientReportsList, columns, 'Client Reports', 'client_reports');
-                  toast.success('Client reports exported to PDF');
-                }}
-                disabled={clientReportsList.length === 0}
-                title="Export to PDF"
+                onClick={() => exportClientReportsFull('pdf')}
+                disabled={clientReportsLoading || (clientReportsPagination.total || 0) === 0}
+                title="Export all rows matching filters to PDF"
               >
                 <i className="fas fa-file-pdf me-1"></i>Export PDF
               </button>
@@ -1541,56 +1494,23 @@ const Reports = () => {
             </div>
           </div>
           <div className="card-body">
-            {/* Period and help text */}
-            <div className="mb-3">
-              <span className="text-muted small me-2">
-                <strong>Period:</strong> {clientReportsMonth ? clientReportsMonth : `${clientReportsFrom || '—'} ${clientReportsFromTime || '00:00'} to ${clientReportsTo || '—'} ${clientReportsToTime || '23:59'}`}
-              </span>
-              <span className="text-muted small d-block mt-1">
-                Client list is transaction-sensitive: only clients with selected transaction activity in the selected time window are shown.
-              </span>
-            </div>
-            {/* Filters */}
+            <p className="text-muted small mb-3">
+              <strong>Period:</strong>{' '}
+              {`${clientReportsFrom || '—'} ${clientReportsFromTime || '00:00'} → ${clientReportsTo || '—'} ${clientReportsToTime || '23:59'}`}
+              {' · '}
+              <strong>Currency:</strong> {clientReportsCurrency === 'LRD' ? 'LRD' : 'USD'}
+              {' · '}
+              Deposits, interest, and penalties are summed for the period; dues and loan outstanding are current balances in the selected currency.
+            </p>
+
             <div className="row g-3 mb-4">
-              <div className="col-md-6 col-lg-2">
-                <label className="form-label small text-muted">Preset</label>
-                <select
-                  className="form-select form-select-sm"
-                  value={clientReportsPreset}
-                  onChange={(e) => setClientReportsPreset(e.target.value)}
-                >
-                  <option value="custom">Custom Range</option>
-                  <option value="this_month">This Month</option>
-                  <option value="last_month">Last Month</option>
-                  <option value="last_7_days">Last 7 Days</option>
-                  <option value="last_30_days">Last 30 Days</option>
-                  <option value="this_year">This Year</option>
-                </select>
-              </div>
-              <div className="col-md-6 col-lg-2">
-                <label className="form-label small text-muted">Month</label>
-                <input
-                  type="month"
-                  className="form-control form-control-sm"
-                  value={clientReportsMonth}
-                  onChange={(e) => {
-                    setClientReportsMonth(e.target.value);
-                    if (e.target.value) setClientReportsPreset('custom');
-                  }}
-                />
-              </div>
               <div className="col-md-6 col-lg-2">
                 <label className="form-label small text-muted">From</label>
                 <input
                   type="date"
                   className="form-control form-control-sm"
                   value={clientReportsFrom}
-                  onChange={(e) => {
-                    setClientReportsFrom(e.target.value);
-                    setClientReportsMonth('');
-                    setClientReportsPreset('custom');
-                  }}
-                  disabled={!!clientReportsMonth}
+                  onChange={(e) => setClientReportsFrom(e.target.value)}
                 />
               </div>
               <div className="col-md-6 col-lg-2">
@@ -1599,33 +1519,41 @@ const Reports = () => {
                   type="date"
                   className="form-control form-control-sm"
                   value={clientReportsTo}
-                  onChange={(e) => {
-                    setClientReportsTo(e.target.value);
-                    setClientReportsMonth('');
-                    setClientReportsPreset('custom');
-                  }}
-                  disabled={!!clientReportsMonth}
+                  onChange={(e) => setClientReportsTo(e.target.value)}
                 />
               </div>
               <div className="col-md-6 col-lg-2">
-                <label className="form-label small text-muted">From Time</label>
+                <label className="form-label small text-muted">From time</label>
                 <input
                   type="time"
                   className="form-control form-control-sm"
                   value={clientReportsFromTime}
                   onChange={(e) => setClientReportsFromTime(e.target.value)}
-                  disabled={!!clientReportsMonth}
                 />
               </div>
               <div className="col-md-6 col-lg-2">
-                <label className="form-label small text-muted">To Time</label>
+                <label className="form-label small text-muted">To time</label>
                 <input
                   type="time"
                   className="form-control form-control-sm"
                   value={clientReportsToTime}
                   onChange={(e) => setClientReportsToTime(e.target.value)}
-                  disabled={!!clientReportsMonth}
                 />
+              </div>
+              <div className="col-md-6 col-lg-3">
+                <label className="form-label small text-muted">Client</label>
+                <select
+                  className="form-select form-select-sm"
+                  value={clientReportsClientId}
+                  onChange={(e) => setClientReportsClientId(e.target.value)}
+                >
+                  <option value="">All clients</option>
+                  {clientReportsClientsOptions.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.client_number} — {c.first_name} {c.last_name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="col-md-6 col-lg-2">
                 <label className="form-label small text-muted">Currency</label>
@@ -1634,42 +1562,25 @@ const Reports = () => {
                   value={clientReportsCurrency}
                   onChange={(e) => setClientReportsCurrency(e.target.value)}
                 >
-                  <option value="ALL">ALL</option>
-                  <option value="LRD">LRD</option>
                   <option value="USD">USD</option>
+                  <option value="LRD">LRD</option>
                 </select>
               </div>
               <div className="col-md-6 col-lg-2">
-                <label className="form-label small text-muted">Transaction Focus</label>
-                <select
-                  className="form-select form-select-sm"
-                  value={clientReportsTxnFocus}
-                  onChange={(e) => setClientReportsTxnFocus(e.target.value)}
-                >
-                  <option value="core">Core (Deposit/Withdrawal/Dues/Payments)</option>
-                  <option value="all">All Types</option>
-                  <option value="deposit">Deposits Only</option>
-                  <option value="withdrawal">Withdrawals Only</option>
-                  <option value="due_payment">Dues Payments Only</option>
-                  <option value="loan_payment">Loan Payments Only</option>
-                </select>
-              </div>
-              <div className="col-md-6 col-lg-2">
-                <label className="form-label small text-muted">Sort By</label>
+                <label className="form-label small text-muted">Sort by</label>
                 <select
                   className="form-select form-select-sm"
                   value={clientReportsSortBy}
                   onChange={(e) => setClientReportsSortBy(e.target.value)}
                 >
-                  <option value="last_transaction_date">Last Txn Date</option>
-                  <option value="first_transaction_date">First Txn Date</option>
-                  <option value="transaction_count">Transaction Count</option>
-                  <option value="total_deposits">Total Deposits</option>
-                  <option value="total_withdrawals">Total Withdrawals</option>
-                  <option value="total_due_payments">Total Dues Paid</option>
-                  <option value="total_loan_payments">Total Loan Payments</option>
+                  <option value="client_number">ID</option>
                   <option value="name">Client Name</option>
-                  <option value="client_number">Client ID</option>
+                  <option value="deposits">Deposits</option>
+                  <option value="interest_received">Interest Received</option>
+                  <option value="dues_outstanding">Dues Outstanding</option>
+                  <option value="penalty_fines">Penalty & Fines</option>
+                  <option value="loan_outstanding">Loan Outstanding</option>
+                  <option value="total_take_home">Total Take Home</option>
                 </select>
               </div>
               <div className="col-md-6 col-lg-2">
@@ -1679,20 +1590,9 @@ const Reports = () => {
                   value={clientReportsSortOrder}
                   onChange={(e) => setClientReportsSortOrder(e.target.value)}
                 >
-                  <option value="desc">Descending</option>
                   <option value="asc">Ascending</option>
+                  <option value="desc">Descending</option>
                 </select>
-              </div>
-              <div className="col-md-6 col-lg-2">
-                <label className="form-label small text-muted">Search by name or ID</label>
-                <input
-                  type="text"
-                  className="form-control form-control-sm"
-                  placeholder="Client name or ID#..."
-                  value={clientReportsSearch}
-                  onChange={(e) => setClientReportsSearch(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && fetchClientReports()}
-                />
               </div>
               <div className="col-md-6 col-lg-2 d-flex align-items-end">
                 <button
@@ -1704,7 +1604,7 @@ const Reports = () => {
                   {clientReportsLoading ? (
                     <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
                   ) : (
-                    <i className="fas fa-search me-1"></i>
+                    <i className="fas fa-filter me-1"></i>
                   )}
                   Apply
                 </button>
@@ -1723,152 +1623,79 @@ const Reports = () => {
                 <table className="table table-hover table-bordered align-middle mb-0">
                   <thead className="table-light">
                     <tr>
-                      <th>ID#</th>
-                      <th>Last Txn Date</th>
-                      <th>Savings ID#</th>
-                      <th>Name</th>
-                      {clientReportsCurrency === 'ALL' ? (
-                        <>
-                          <th className="text-end">Total Savings (LRD)</th>
-                          <th className="text-end">Total Savings (USD)</th>
-                          <th className="text-end">Personal Interest (LRD)</th>
-                          <th className="text-end">Personal Interest (USD)</th>
-                          <th className="text-end">General Interest (LRD)</th>
-                          <th className="text-end">General Interest (USD)</th>
-                          <th className="text-end">Outstanding Loan (LRD)</th>
-                          <th className="text-end">Outstanding Loan (USD)</th>
-                          <th className="text-end">Loan Repayment Done (LRD)</th>
-                          <th className="text-end">Loan Repayment Done (USD)</th>
-                          <th>Loan Status</th>
-                          <th className="text-end">Outstanding Dues (LRD)</th>
-                          <th className="text-end">Outstanding Dues (USD)</th>
-                          <th className="text-end">Total Dues Paid (LRD)</th>
-                          <th className="text-end">Total Dues Paid (USD)</th>
-                          <th className="text-end">Penalty (LRD)</th>
-                          <th className="text-end">Penalty (USD)</th>
-                        </>
-                      ) : (
-                        <>
-                          <th className="text-end">Total Savings</th>
-                          <th className="text-end">Personal Interest</th>
-                          <th className="text-end">General Interest</th>
-                          <th className="text-end">Outstanding Loan</th>
-                          <th className="text-end">Loan Repayment Done</th>
-                          <th>Loan Status</th>
-                          <th className="text-end">Outstanding Dues</th>
-                          <th className="text-end">Total Dues Paid</th>
-                          <th className="text-end">Penalty</th>
-                        </>
-                      )}
+                      <th>ID</th>
+                      <th>Client Name</th>
+                      <th className="text-end">Deposits</th>
+                      <th className="text-end">Interest Received</th>
+                      <th className="text-end">Dues Outstanding</th>
+                      <th className="text-end">Penalty &amp; Fines</th>
+                      <th className="text-end">Loan Outstanding</th>
+                      <th className="text-end">Total Take Home</th>
                       <th className="text-center">Details</th>
                     </tr>
                   </thead>
                   <tbody>
                     {clientReportsList.length === 0 ? (
                       <tr>
-                        <td colSpan={clientReportsCurrency === 'ALL' ? 23 : 14} className="text-center text-muted py-4">
-                          No clients match the filters. Try adjusting dates, currency, or search.
+                        <td colSpan="9" className="text-center text-muted py-4">
+                          No clients match the filters. Adjust dates, client, or currency and click Apply.
                         </td>
                       </tr>
                     ) : (
-                      paginatedClientReports.map((row) => (
-                        <React.Fragment key={row.id}>
-                          <tr>
-                            <td>{row.client_number ?? row.id}</td>
-                            <td>{row.last_transaction_date ? new Date(row.last_transaction_date).toLocaleDateString() : '-'}</td>
-                            <td>{row.savings_id ?? '-'}</td>
+                      paginatedClientReports.map((row) => {
+                        const cur = clientReportsCurrency === 'LRD' ? 'LRD' : 'USD';
+                        return (
+                          <tr key={row.id}>
+                            <td><strong>{row.client_number ?? row.id}</strong></td>
                             <td>{row.name ?? '-'}</td>
-                            {clientReportsCurrency === 'ALL' ? (
-                              <>
-                                <td className="text-end">{formatCurrency(row.total_savings_lrd, 'LRD')}</td>
-                                <td className="text-end">{formatCurrency(row.total_savings_usd, 'USD')}</td>
-                                <td className="text-end">{formatCurrency(row.personal_interest_lrd, 'LRD')}</td>
-                                <td className="text-end">{formatCurrency(row.personal_interest_usd, 'USD')}</td>
-                                <td className="text-end">{formatCurrency(row.general_interest_lrd, 'LRD')}</td>
-                                <td className="text-end">{formatCurrency(row.general_interest_usd, 'USD')}</td>
-                                <td className="text-end">{formatCurrency(row.outstanding_loan_lrd, 'LRD')}</td>
-                                <td className="text-end">{formatCurrency(row.outstanding_loan_usd, 'USD')}</td>
-                                <td className="text-end">{formatCurrency(row.loan_repayment_done_lrd, 'LRD')}</td>
-                                <td className="text-end">{formatCurrency(row.loan_repayment_done_usd, 'USD')}</td>
-                                <td><span className="badge bg-secondary">{row.loan_status ?? '-'}</span></td>
-                                <td className="text-end">{formatCurrency(row.outstanding_dues_lrd, 'LRD')}</td>
-                                <td className="text-end">{formatCurrency(row.outstanding_dues_usd, 'USD')}</td>
-                                <td className="text-end">{formatCurrency(row.total_dues_paid_lrd, 'LRD')}</td>
-                                <td className="text-end">{formatCurrency(row.total_dues_paid_usd, 'USD')}</td>
-                                <td className="text-end">{formatCurrency(row.penalty_lrd, 'LRD')}</td>
-                                <td className="text-end">{formatCurrency(row.penalty_usd, 'USD')}</td>
-                              </>
-                            ) : (
-                              <>
-                                <td className="text-end">{formatCurrency(row.total_savings, clientReportsCurrency)}</td>
-                                <td className="text-end">{formatCurrency(row.personal_interest, clientReportsCurrency)}</td>
-                                <td className="text-end">{formatCurrency(row.general_interest, clientReportsCurrency)}</td>
-                                <td className="text-end">{formatCurrency(row.outstanding_loan, clientReportsCurrency)}</td>
-                                <td className="text-end">{formatCurrency(row.loan_repayment_done, clientReportsCurrency)}</td>
-                                <td><span className="badge bg-secondary">{row.loan_status ?? '-'}</span></td>
-                                <td className="text-end">{formatCurrency(row.outstanding_dues, clientReportsCurrency)}</td>
-                                <td className="text-end">{formatCurrency(row.total_dues_paid, clientReportsCurrency)}</td>
-                                <td className="text-end">{formatCurrency(row.penalty, clientReportsCurrency)}</td>
-                              </>
-                            )}
+                            <td className="text-end">{formatCurrency(row.deposits, cur)}</td>
+                            <td className="text-end">{formatCurrency(row.interest_received, cur)}</td>
+                            <td className="text-end">{formatCurrency(row.dues_outstanding, cur)}</td>
+                            <td className="text-end">{formatCurrency(row.penalty_fines, cur)}</td>
+                            <td className="text-end">{formatCurrency(row.loan_outstanding, cur)}</td>
+                            <td className="text-end">{formatCurrency(row.total_take_home, cur)}</td>
                             <td className="text-center">
-                              <button
-                                type="button"
-                                className="btn btn-sm btn-outline-secondary me-1"
-                                title={clientReportsExpandedId === row.id ? 'Hide transactions' : 'Show transactions in period'}
-                                onClick={() => setClientReportsExpandedId(prev => prev === row.id ? null : row.id)}
-                              >
-                                <i className={`fas fa-${(row.transactions && row.transactions.length) ? (clientReportsExpandedId === row.id ? 'chevron-up' : 'chevron-down') : 'minus'} me-1`}></i>
-                                {row.transactions && row.transactions.length ? `${row.transactions.length} txns` : '0'}
-                              </button>
-                              <Link to={`/clients/${row.id}`} className="btn btn-sm btn-outline-primary" title="View client details">
+                              <Link to={`/clients/${row.id}`} className="btn btn-sm btn-outline-primary" title="View client">
                                 <i className="fas fa-user me-1"></i>View
                               </Link>
                             </td>
                           </tr>
-                          {clientReportsExpandedId === row.id && row.transactions && row.transactions.length > 0 && (
-                            <tr>
-                              <td colSpan={clientReportsCurrency === 'ALL' ? 23 : 14} className="bg-light p-3">
-                                <div className="small">
-                                  <strong>Transactions in period (From–To) — each with date:</strong>
-                                  <div className="table-responsive mt-2">
-                                    <table className="table table-sm table-bordered mb-0">
-                                      <thead className="table-light">
-                                        <tr>
-                                          <th>Date</th>
-                                          <th>Type</th>
-                                          <th className="text-end">Amount</th>
-                                          <th>Currency</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody>
-                                        {row.transactions.map((t, idx) => (
-                                          <tr key={idx}>
-                                            <td>{t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '—'}</td>
-                                            <td><span className="badge bg-secondary">{t.type || '—'}</span></td>
-                                            <td className="text-end">{formatCurrency(t.amount, t.currency)}</td>
-                                            <td>{t.currency || 'USD'}</td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-                                </div>
-                              </td>
-                            </tr>
-                          )}
-                        </React.Fragment>
-                      ))
+                        );
+                      })
+                    )}
+                    {clientReportsGrandTotals && clientReportsList.length > 0 && (
+                      <tr className="table-secondary fw-bold">
+                        <td colSpan="2">Grand Total</td>
+                        <td className="text-end">
+                          {formatCurrency(clientReportsGrandTotals.deposits, clientReportsCurrency === 'LRD' ? 'LRD' : 'USD')}
+                        </td>
+                        <td className="text-end">
+                          {formatCurrency(clientReportsGrandTotals.interest_received, clientReportsCurrency === 'LRD' ? 'LRD' : 'USD')}
+                        </td>
+                        <td className="text-end">
+                          {formatCurrency(clientReportsGrandTotals.dues_outstanding, clientReportsCurrency === 'LRD' ? 'LRD' : 'USD')}
+                        </td>
+                        <td className="text-end">
+                          {formatCurrency(clientReportsGrandTotals.penalty_fines, clientReportsCurrency === 'LRD' ? 'LRD' : 'USD')}
+                        </td>
+                        <td className="text-end">
+                          {formatCurrency(clientReportsGrandTotals.loan_outstanding, clientReportsCurrency === 'LRD' ? 'LRD' : 'USD')}
+                        </td>
+                        <td className="text-end">
+                          {formatCurrency(clientReportsGrandTotals.total_take_home, clientReportsCurrency === 'LRD' ? 'LRD' : 'USD')}
+                        </td>
+                        <td />
+                      </tr>
                     )}
                   </tbody>
                 </table>
               </div>
             )}
-            {!clientReportsLoading && clientReportsList.length > 0 && (
+            {!clientReportsLoading && (clientReportsPagination.total || 0) > 0 && (
               <div className="d-flex justify-content-between align-items-center mt-2">
                 <p className="text-muted small mb-0">
-                  Showing {clientReportsList.length === 0 ? 0 : ((clientReportsPage - 1) * clientReportsRowsPerPage + 1)}-
-                  {Math.min(clientReportsPage * clientReportsRowsPerPage, clientReportsPagination.total || 0)} of {clientReportsPagination.total || 0} client(s). Data refreshes when you change filters or every 30 seconds.
+                  Showing {((clientReportsPage - 1) * clientReportsRowsPerPage + 1)}-
+                  {Math.min(clientReportsPage * clientReportsRowsPerPage, clientReportsPagination.total || 0)} of {clientReportsPagination.total || 0} client(s). Grand totals reflect all clients matching filters.
                 </p>
                 <div className="d-flex align-items-center gap-2">
                   <select
