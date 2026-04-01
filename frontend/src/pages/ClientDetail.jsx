@@ -161,11 +161,35 @@ const ClientDetail = () => {
 
   const isAdmin = user?.role === 'admin';
   const summary = fullRecord?.summary || null;
+  const summaryByCurrency = summary?.byCurrency || null;
   const formatCur = (amount, curr) => {
     const c = curr || 'USD';
     const n = parseFloat(amount || 0);
     return c === 'LRD' ? `LRD ${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   };
+
+  const savingsUsd = savings.filter((a) => (a.currency || 'USD') !== 'LRD');
+  const savingsLrd = savings.filter((a) => (a.currency || 'USD') === 'LRD');
+
+  const categorizeClientTransactions = (list) => {
+    const rows = list || [];
+    if (!rows.length) return { savings: [], dues: [], loanRelated: [], other: [] };
+    const savingsTypes = ['deposit', 'withdrawal'];
+    const loanRelatedTypes = ['loan_payment', 'loan_disbursement', 'fee', 'interest', 'personal_interest_payment', 'general_interest', 'penalty', 'transfer', 'push_back'];
+    return {
+      savings: rows.filter((t) => savingsTypes.includes(t.type)),
+      dues: rows.filter((t) => t.type === 'due_payment'),
+      loanRelated: rows.filter((t) => loanRelatedTypes.includes(t.type) && t.type !== 'due_payment'),
+      other: rows.filter(
+        (t) => !savingsTypes.includes(t.type) && t.type !== 'due_payment' && !loanRelatedTypes.includes(t.type)
+      )
+    };
+  };
+
+  const txCategories = fullRecord?.transactions ? categorizeClientTransactions(fullRecord.transactions) : null;
+
+  const savingsRecUsd = (fullRecord?.savingsRecords || []).filter((r) => (r.currency || 'USD') !== 'LRD');
+  const savingsRecLrd = (fullRecord?.savingsRecords || []).filter((r) => (r.currency || 'USD') === 'LRD');
 
   return (
     <div className="fade-in">
@@ -524,7 +548,7 @@ const ClientDetail = () => {
           ) : null;
         })()}
 
-        {/* Savings Accounts */}
+        {/* Savings Accounts — separated by currency (USD vs LRD) */}
         <div className="col-12 mb-4">
           <div className="card">
             <div className="card-header bg-success text-white d-flex justify-content-between align-items-center">
@@ -535,40 +559,90 @@ const ClientDetail = () => {
             </div>
             <div className="card-body">
               {savings.length > 0 ? (
-                <div className="table-responsive">
-                  <table className="table table-hover">
-                    <thead>
-                      <tr>
-                        <th>Account Number</th>
-                        <th>Type</th>
-                        <th>Balance</th>
-                        <th>Interest Rate</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {savings.map((account) => (
-                        <tr key={account.id}>
-                          <td><strong>{account.account_number}</strong></td>
-                          <td>{account.account_type}</td>
-                          <td>{formatCur(account.balance, account.currency)}</td>
-                          <td>{account.interest_rate || 0}%</td>
-                          <td>
-                            <span className={`badge bg-${account.status === 'active' ? 'success' : account.status === 'pending' ? 'warning' : 'secondary'}`}>
-                              {account.status}
-                            </span>
-                          </td>
-                          <td>
-                            <Link to={`/savings/${account.id}`} className="btn btn-sm btn-outline-primary">
-                              <i className="fas fa-eye"></i>
-                            </Link>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
+                <>
+                  {savingsUsd.length > 0 && (
+                    <div className="mb-4">
+                      <h6 className="text-primary border-bottom pb-2">
+                        <i className="fas fa-dollar-sign me-2"></i>USD savings accounts
+                      </h6>
+                      <div className="table-responsive">
+                        <table className="table table-hover">
+                          <thead>
+                            <tr>
+                              <th>Account Number</th>
+                              <th>Type</th>
+                              <th>Balance</th>
+                              <th>Interest Rate</th>
+                              <th>Status</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {savingsUsd.map((account) => (
+                              <tr key={account.id}>
+                                <td><strong>{account.account_number}</strong></td>
+                                <td>{account.account_type}</td>
+                                <td>{formatCur(account.balance, 'USD')}</td>
+                                <td>{account.interest_rate || 0}%</td>
+                                <td>
+                                  <span className={`badge bg-${account.status === 'active' ? 'success' : account.status === 'pending' ? 'warning' : 'secondary'}`}>
+                                    {account.status}
+                                  </span>
+                                </td>
+                                <td>
+                                  <Link to={`/savings/${account.id}`} className="btn btn-sm btn-outline-primary">
+                                    <i className="fas fa-eye"></i>
+                                  </Link>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                  {savingsLrd.length > 0 && (
+                    <div>
+                      <h6 className="text-success border-bottom pb-2">
+                        <i className="fas fa-coins me-2"></i>LRD savings accounts
+                      </h6>
+                      <div className="table-responsive">
+                        <table className="table table-hover">
+                          <thead>
+                            <tr>
+                              <th>Account Number</th>
+                              <th>Type</th>
+                              <th>Balance</th>
+                              <th>Interest Rate</th>
+                              <th>Status</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {savingsLrd.map((account) => (
+                              <tr key={account.id}>
+                                <td><strong>{account.account_number}</strong></td>
+                                <td>{account.account_type}</td>
+                                <td>{formatCur(account.balance, 'LRD')}</td>
+                                <td>{account.interest_rate || 0}%</td>
+                                <td>
+                                  <span className={`badge bg-${account.status === 'active' ? 'success' : account.status === 'pending' ? 'warning' : 'secondary'}`}>
+                                    {account.status}
+                                  </span>
+                                </td>
+                                <td>
+                                  <Link to={`/savings/${account.id}`} className="btn btn-sm btn-outline-primary">
+                                    <i className="fas fa-eye"></i>
+                                  </Link>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <p className="text-muted text-center py-3">No savings accounts found</p>
               )}
@@ -584,124 +658,225 @@ const ClientDetail = () => {
               <div className="col-12 mb-4">
                 <div className="card border-primary">
                   <div className="card-header bg-primary text-white">
-                    <h5 className="mb-0"><i className="fas fa-wallet me-2"></i>Client Summary & Total Take Home</h5>
+                    <h5 className="mb-0"><i className="fas fa-wallet me-2"></i>Client Summary & Take Home (by currency)</h5>
                   </div>
                   <div className="card-body">
-                    <div className="row g-3">
-                      <div className="col-md-3">
-                        <div className="p-3 bg-light rounded">
-                          <small className="text-muted d-block">Total Savings Balance</small>
-                          <strong className="text-success">{formatCur(summary.totalSavingsBalance, summary.currency)}</strong>
+                    <p className="text-muted small mb-3">
+                      Savings, loans, interest, and penalties are shown in each currency. Outstanding dues apply only in the client&apos;s dues currency (
+                      <strong>{summary.dues_currency || fullRecord?.dues?.dues_currency || 'USD'}</strong>
+                      ) and are not mixed into the other currency column.
+                    </p>
+                    {summaryByCurrency ? (
+                      <div className="row g-3">
+                        {['USD', 'LRD'].map((cur) => {
+                          const s = summaryByCurrency[cur];
+                          if (!s) return null;
+                          return (
+                            <div key={cur} className="col-md-6">
+                              <div className="border rounded p-3 h-100 bg-light">
+                                <h6 className="text-primary border-bottom pb-2 mb-3">{cur} summary</h6>
+                                <div className="row g-2 small">
+                                  <div className="col-12 d-flex justify-content-between">
+                                    <span className="text-muted">Savings balance</span>
+                                    <strong className="text-success">{formatCur(s.totalSavingsBalance, cur)}</strong>
+                                  </div>
+                                  <div className="col-12 d-flex justify-content-between">
+                                    <span className="text-muted">Interest received</span>
+                                    <strong className="text-info">{formatCur(s.totalInterestReceived, cur)}</strong>
+                                  </div>
+                                  <div className="col-12 d-flex justify-content-between">
+                                    <span className="text-muted">Dues outstanding</span>
+                                    <strong className="text-warning">{formatCur(s.totalDuesOutstanding, cur)}</strong>
+                                  </div>
+                                  <div className="col-12 d-flex justify-content-between">
+                                    <span className="text-muted">Penalties / fines</span>
+                                    <strong className="text-danger">{formatCur(s.totalPenalties, cur)}</strong>
+                                  </div>
+                                  <div className="col-12 d-flex justify-content-between">
+                                    <span className="text-muted">Loan outstanding</span>
+                                    <strong className="text-danger">{formatCur(s.totalLoanOutstanding, cur)}</strong>
+                                  </div>
+                                  <div className="col-12 mt-2 pt-2 border-top">
+                                    <div className="d-flex justify-content-between align-items-center">
+                                      <span className="text-muted">Take home ({cur})</span>
+                                      <span className="h5 mb-0 text-primary">{formatCur(s.takeHome, cur)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="row g-3">
+                        <div className="col-md-3">
+                          <div className="p-3 bg-light rounded">
+                            <small className="text-muted d-block">Total Savings Balance</small>
+                            <strong className="text-success">{formatCur(summary.totalSavingsBalance, summary.currency)}</strong>
+                          </div>
+                        </div>
+                        <div className="col-md-3">
+                          <div className="p-3 bg-light rounded">
+                            <small className="text-muted d-block">Total Interest Received</small>
+                            <strong className="text-info">{formatCur(summary.totalInterestReceived, summary.currency)}</strong>
+                          </div>
+                        </div>
+                        <div className="col-md-3">
+                          <div className="p-3 bg-light rounded">
+                            <small className="text-muted d-block">Dues Outstanding</small>
+                            <strong className="text-warning">{formatCur(summary.totalDuesOutstanding, summary.currency)}</strong>
+                          </div>
+                        </div>
+                        <div className="col-md-3">
+                          <div className="p-3 bg-light rounded">
+                            <small className="text-muted d-block">Total Penalties</small>
+                            <strong className="text-danger">{formatCur(summary.totalPenalties, summary.currency)}</strong>
+                          </div>
+                        </div>
+                        <div className="col-md-3">
+                          <div className="p-3 bg-light rounded">
+                            <small className="text-muted d-block">Total Loan Outstanding</small>
+                            <strong className="text-danger">{formatCur(summary.totalLoanOutstanding, summary.currency)}</strong>
+                          </div>
+                        </div>
+                        <div className="col-12">
+                          <div className="p-3 bg-primary bg-opacity-10 rounded border border-primary">
+                            <small className="text-muted d-block">Total Take Home (legacy)</small>
+                            <h4 className="mb-0 text-primary">{formatCur(summary.takeHome, summary.currency)}</h4>
+                          </div>
                         </div>
                       </div>
-                      <div className="col-md-3">
-                        <div className="p-3 bg-light rounded">
-                          <small className="text-muted d-block">Total Interest Received</small>
-                          <strong className="text-info">{formatCur(summary.totalInterestReceived, summary.currency)}</strong>
-                        </div>
-                      </div>
-                      <div className="col-md-3">
-                        <div className="p-3 bg-light rounded">
-                          <small className="text-muted d-block">Dues Outstanding</small>
-                          <strong className="text-warning">{formatCur(summary.totalDuesOutstanding, summary.currency)}</strong>
-                        </div>
-                      </div>
-                      <div className="col-md-3">
-                        <div className="p-3 bg-light rounded">
-                          <small className="text-muted d-block">Total Penalties</small>
-                          <strong className="text-danger">{formatCur(summary.totalPenalties, summary.currency)}</strong>
-                        </div>
-                      </div>
-                      <div className="col-md-3">
-                        <div className="p-3 bg-light rounded">
-                          <small className="text-muted d-block">Total Loan Outstanding</small>
-                          <strong className="text-danger">{formatCur(summary.totalLoanOutstanding, summary.currency)}</strong>
-                        </div>
-                      </div>
-                      <div className="col-12">
-                        <div className="p-3 bg-primary bg-opacity-10 rounded border border-primary">
-                          <small className="text-muted d-block">Total Take Home (after savings, interest, dues, penalties, loan outstanding)</small>
-                          <h4 className="mb-0 text-primary">{formatCur(summary.takeHome, summary.currency)}</h4>
-                        </div>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* Savings Records (transactions per account) */}
+            {/* Savings Records (per account) — split by currency */}
             {fullRecord.savingsRecords && fullRecord.savingsRecords.length > 0 && (
               <div className="col-12 mb-4">
                 <div className="card">
                   <div className="card-header bg-success text-white">
-                    <h5 className="mb-0"><i className="fas fa-list me-2"></i>Savings Records (Recent Transactions)</h5>
+                    <h5 className="mb-0"><i className="fas fa-list me-2"></i>Savings activity (deposits & withdrawals by account)</h5>
                   </div>
                   <div className="card-body">
-                    <div className="table-responsive">
-                      <table className="table table-hover table-sm">
-                        <thead>
-                          <tr>
-                            <th>Date</th>
-                            <th>Account</th>
-                            <th>Type</th>
-                            <th>Amount</th>
-                            <th>Description</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {fullRecord.savingsRecords.slice(0, 100).map((r, idx) => (
-                            <tr key={r.id || idx}>
-                              <td>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString() : '-'}</td>
-                              <td>{r.account_number || '-'}</td>
-                              <td><span className="badge bg-secondary">{r.type || '-'}</span></td>
-                              <td>{formatCur(r.amount, r.currency)}</td>
-                              <td>{r.description || r.purpose || '-'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    {savingsRecUsd.length > 0 && (
+                      <div className="mb-4">
+                        <h6 className="text-primary border-bottom pb-2">USD savings transactions</h6>
+                        <div className="table-responsive">
+                          <table className="table table-hover table-sm">
+                            <thead>
+                              <tr>
+                                <th>Date</th>
+                                <th>Account</th>
+                                <th>Type</th>
+                                <th>Amount</th>
+                                <th>Description</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {savingsRecUsd.slice(0, 80).map((r, idx) => (
+                                <tr key={r.id || idx}>
+                                  <td>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString() : '-'}</td>
+                                  <td>{r.account_number || '-'}</td>
+                                  <td><span className="badge bg-secondary">{r.type || '-'}</span></td>
+                                  <td>{formatCur(r.amount, r.currency)}</td>
+                                  <td>{r.description || r.purpose || '-'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
+                    {savingsRecLrd.length > 0 && (
+                      <div>
+                        <h6 className="text-success border-bottom pb-2">LRD savings transactions</h6>
+                        <div className="table-responsive">
+                          <table className="table table-hover table-sm">
+                            <thead>
+                              <tr>
+                                <th>Date</th>
+                                <th>Account</th>
+                                <th>Type</th>
+                                <th>Amount</th>
+                                <th>Description</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {savingsRecLrd.slice(0, 80).map((r, idx) => (
+                                <tr key={r.id || idx}>
+                                  <td>{r.transaction_date ? new Date(r.transaction_date).toLocaleDateString() : '-'}</td>
+                                  <td>{r.account_number || '-'}</td>
+                                  <td><span className="badge bg-secondary">{r.type || '-'}</span></td>
+                                  <td>{formatCur(r.amount, r.currency)}</td>
+                                  <td>{r.description || r.purpose || '-'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             )}
 
-            {/* All Transactions */}
-            {fullRecord.transactions && fullRecord.transactions.length > 0 && (
+            {/* Transactions: savings / dues / loan-related — grouped */}
+            {fullRecord.transactions && fullRecord.transactions.length > 0 && txCategories && (
               <div className="col-12 mb-4">
                 <div className="card">
                   <div className="card-header bg-info text-white d-flex justify-content-between align-items-center">
-                    <h5 className="mb-0"><i className="fas fa-exchange-alt me-2"></i>Transaction Records</h5>
+                    <h5 className="mb-0"><i className="fas fa-exchange-alt me-2"></i>Transactions (by category)</h5>
                     <Link to={`/transactions?client_id=${id}`} className="btn btn-sm btn-light">View All</Link>
                   </div>
                   <div className="card-body">
-                    <div className="table-responsive">
-                      <table className="table table-hover table-sm">
-                        <thead>
-                          <tr>
-                            <th>Date</th>
-                            <th>Number</th>
-                            <th>Type</th>
-                            <th>Amount</th>
-                            <th>Loan / Account</th>
-                            <th>Description</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {fullRecord.transactions.slice(0, 100).map((t) => (
-                            <tr key={t.id}>
-                              <td>{t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '-'}</td>
-                              <td><strong>{t.transaction_number}</strong></td>
-                              <td><span className="badge bg-secondary">{t.type}</span></td>
-                              <td>{formatCur(t.amount, t.currency)}</td>
-                              <td>{t.loan?.loan_number || t.savingsAccount?.account_number || '-'}</td>
-                              <td>{t.description || t.purpose || '-'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    {[
+                      { key: 'savings', title: 'Savings (deposits & withdrawals)', rows: txCategories.savings, badge: 'success' },
+                      { key: 'dues', title: 'Dues payments', rows: txCategories.dues, badge: 'warning' },
+                      { key: 'loanRelated', title: 'Loans & related (payments, fees, interest, penalties, etc.)', rows: txCategories.loanRelated, badge: 'primary' },
+                      { key: 'other', title: 'Other transactions', rows: txCategories.other, badge: 'secondary' }
+                    ].map(
+                      (section) =>
+                        section.rows.length > 0 && (
+                          <div key={section.key} className="mb-4">
+                            <h6 className="border-bottom pb-2">
+                              <span className={`badge bg-${section.badge} me-2`}>{section.rows.length}</span>
+                              {section.title}
+                            </h6>
+                            <div className="table-responsive">
+                              <table className="table table-hover table-sm">
+                                <thead>
+                                  <tr>
+                                    <th>Date</th>
+                                    <th>Number</th>
+                                    <th>Type</th>
+                                    <th>Amount</th>
+                                    <th>Currency</th>
+                                    <th>Loan / Account</th>
+                                    <th>Description</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {section.rows.slice(0, 80).map((t) => (
+                                    <tr key={t.id}>
+                                      <td>{t.transaction_date ? new Date(t.transaction_date).toLocaleDateString() : '-'}</td>
+                                      <td><strong>{t.transaction_number}</strong></td>
+                                      <td><span className="badge bg-secondary">{t.type}</span></td>
+                                      <td>{formatCur(t.amount, t.currency)}</td>
+                                      <td>{t.currency || 'USD'}</td>
+                                      <td>{t.loan?.loan_number || t.savingsAccount?.account_number || '-'}</td>
+                                      <td>{t.description || t.purpose || '-'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        )
+                    )}
                   </div>
                 </div>
               </div>

@@ -250,13 +250,78 @@ router.get('/:id/full', authenticate, async (req, res) => {
       }
     }
 
-    const totalSavingsBalance = savingsAccounts.reduce((sum, s) => sum + parseFloat(s.balance || 0), 0);
-    const totalInterestReceived = interestShared.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0);
-    const totalDuesOutstanding = Math.abs(Math.min(0, parseFloat(client.total_dues || 0)));
-    const totalPenalties = penaltyTransactions.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0) +
-      loanRepaymentsWithPenalty.reduce((sum, p) => sum + (p.penalty_amount || 0), 0);
-    const totalLoanOutstanding = loans.reduce((sum, l) => sum + parseFloat(l.outstanding_balance || 0), 0);
-    const takeHome = totalSavingsBalance + totalInterestReceived - totalDuesOutstanding - totalPenalties - totalLoanOutstanding;
+    const normalizeCur = (c) => (String(c || 'USD').toUpperCase() === 'LRD' ? 'LRD' : 'USD');
+    const totalDuesOutstandingRaw = Math.abs(Math.min(0, parseFloat(client.total_dues || 0)));
+    const duesCurrency = normalizeCur(client.dues_currency);
+
+    const summaryByCurrency = {
+      USD: {
+        totalSavingsBalance: 0,
+        totalInterestReceived: 0,
+        totalDuesOutstanding: 0,
+        totalPenalties: 0,
+        totalLoanOutstanding: 0,
+        takeHome: 0
+      },
+      LRD: {
+        totalSavingsBalance: 0,
+        totalInterestReceived: 0,
+        totalDuesOutstanding: 0,
+        totalPenalties: 0,
+        totalLoanOutstanding: 0,
+        takeHome: 0
+      }
+    };
+
+    savingsAccounts.forEach((s) => {
+      const c = normalizeCur(s.currency);
+      summaryByCurrency[c].totalSavingsBalance += parseFloat(s.balance || 0);
+    });
+
+    interestShared.forEach((t) => {
+      const c = normalizeCur(t.currency);
+      summaryByCurrency[c].totalInterestReceived += parseFloat(t.amount || 0);
+    });
+
+    // Outstanding dues apply only in the client's dues currency (never mixed into the other currency bucket)
+    summaryByCurrency[duesCurrency].totalDuesOutstanding = totalDuesOutstandingRaw;
+
+    loans.forEach((l) => {
+      const c = normalizeCur(l.currency);
+      summaryByCurrency[c].totalLoanOutstanding += parseFloat(l.outstanding_balance || 0);
+    });
+
+    penaltyTransactions.forEach((t) => {
+      const c = normalizeCur(t.currency);
+      summaryByCurrency[c].totalPenalties += parseFloat(t.amount || 0);
+    });
+    loanRepaymentsWithPenalty.forEach((p) => {
+      const c = normalizeCur(p.currency);
+      summaryByCurrency[c].totalPenalties += parseFloat(p.penalty_amount || 0);
+    });
+
+    ['USD', 'LRD'].forEach((c) => {
+      const s = summaryByCurrency[c];
+      s.takeHome =
+        s.totalSavingsBalance +
+        s.totalInterestReceived -
+        s.totalDuesOutstanding -
+        s.totalPenalties -
+        s.totalLoanOutstanding;
+    });
+
+    // Legacy combined totals (same currency only per field — do not add USD+LRD balances)
+    const totalSavingsBalance =
+      summaryByCurrency.USD.totalSavingsBalance + summaryByCurrency.LRD.totalSavingsBalance;
+    const totalInterestReceived =
+      summaryByCurrency.USD.totalInterestReceived + summaryByCurrency.LRD.totalInterestReceived;
+    const totalDuesOutstanding = totalDuesOutstandingRaw;
+    const totalPenalties =
+      summaryByCurrency.USD.totalPenalties + summaryByCurrency.LRD.totalPenalties;
+    const totalLoanOutstanding =
+      summaryByCurrency.USD.totalLoanOutstanding + summaryByCurrency.LRD.totalLoanOutstanding;
+    const takeHome =
+      summaryByCurrency.USD.takeHome + summaryByCurrency.LRD.takeHome;
 
     const loansWithSchedules = loans.map(loan => {
       const loanData = loan.toJSON();
@@ -310,7 +375,9 @@ router.get('/:id/full', authenticate, async (req, res) => {
           totalPenalties,
           totalLoanOutstanding,
           takeHome,
-          currency: client.dues_currency || 'USD'
+          currency: client.dues_currency || 'USD',
+          dues_currency: duesCurrency,
+          byCurrency: summaryByCurrency
         }
       }
     });

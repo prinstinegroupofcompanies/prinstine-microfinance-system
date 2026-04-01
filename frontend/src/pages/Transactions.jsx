@@ -37,10 +37,11 @@ const Transactions = () => {
   });
 
   // Define all fetch functions before useEffect hooks
-  const fetchTransactions = useCallback(async () => {
+  const fetchTransactions = useCallback(async (options = {}) => {
+    const silent = Boolean(options.silent);
     const requestId = ++fetchRequestIdRef.current;
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       const response = await apiClient.get('/api/transactions', {
         params: { page: currentPage, limit: rowsPerPage }
       });
@@ -50,7 +51,7 @@ const Transactions = () => {
     } catch (error) {
       if (requestId !== fetchRequestIdRef.current) return;
       console.error('Failed to fetch transactions:', error);
-      toast.error('Failed to load transactions');
+      if (!silent) toast.error('Failed to load transactions');
     } finally {
       if (requestId !== fetchRequestIdRef.current) return;
       setLoading(false);
@@ -86,14 +87,16 @@ const Transactions = () => {
 
   useEffect(() => {
     fetchTransactions();
-  }, [currentPage, rowsPerPage]);
+  }, [fetchTransactions]);
 
   useEffect(() => {
     fetchClients();
     fetchLoans();
     fetchSavingsAccounts();
-    // Real-time updates every 5 seconds
-    const interval = setInterval(fetchTransactions, 5000);
+  }, []);
+
+  useEffect(() => {
+    const interval = setInterval(() => fetchTransactions({ silent: true }), 5000);
     return () => clearInterval(interval);
   }, [fetchTransactions]);
 
@@ -599,7 +602,7 @@ const Transactions = () => {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="8" className="text-center text-muted py-4">
+                      <td colSpan="9" className="text-center text-muted py-4">
                         No transactions found
                       </td>
                     </tr>
@@ -607,7 +610,7 @@ const Transactions = () => {
                 </tbody>
               </table>
             </div>
-            {transactions.length > 0 && (
+            {(pagination.total || 0) > 0 && (
               <div className="d-flex justify-content-between align-items-center p-3 border-top">
                 <small className="text-muted">
                   Showing {transactions.length === 0 ? 0 : ((currentPage - 1) * rowsPerPage + 1)}-
