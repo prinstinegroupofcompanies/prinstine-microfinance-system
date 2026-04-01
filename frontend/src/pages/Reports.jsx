@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useCallback } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import apiClient from '../config/axios';
 import { Bar, Line, Pie } from 'react-chartjs-2';
