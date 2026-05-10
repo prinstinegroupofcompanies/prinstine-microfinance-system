@@ -504,6 +504,17 @@ router.get('/:id', async (req, res) => {
       });
     }
 
+    // Borrowers can only view their own transactions
+    if (req.user?.role === 'borrower') {
+      const borrowerClient = await getBorrowerClient(req.userId, req.user?.email);
+      if (!borrowerClient || transaction.client_id !== borrowerClient.id) {
+        return res.status(403).json({
+          success: false,
+          message: 'Access denied'
+        });
+      }
+    }
+
     res.json({
       success: true,
       data: { transaction }
@@ -581,7 +592,7 @@ router.post('/:id/approve', authorize(...APPROVER_ROLES), async (req, res) => {
 });
 
 // Update transaction
-router.put('/:id', [
+router.put('/:id', authorize('admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor', 'finance'), [
   body('amount').optional().isFloat({ min: 0.01 }),
   body('type').optional().isIn(['deposit', 'withdrawal', 'loan_payment', 'loan_disbursement', 'fee', 'interest', 'penalty', 'transfer', 'push_back', 'personal_interest_payment', 'general_interest', 'due_payment']),
   body('currency').optional().isIn(['LRD', 'USD'])

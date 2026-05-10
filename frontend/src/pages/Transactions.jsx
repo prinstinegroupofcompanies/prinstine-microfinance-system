@@ -8,6 +8,7 @@ import { APPROVER_ROLES } from '../utils/permissions';
 
 const Transactions = () => {
   const { user } = useAuth();
+  const canEditTransaction = user?.role !== 'borrower';
   const canDeleteTransaction = ['admin', 'head_micro_loan'].includes(user?.role);
   const printRef = useRef(null);
   const fetchRequestIdRef = useRef(0);
@@ -238,6 +239,11 @@ const Transactions = () => {
   };
 
   const handleEdit = async (transactionId) => {
+    if (!canEditTransaction) {
+      toast.error('You can only view transactions');
+      return;
+    }
+
     try {
       const response = await apiClient.get(`/api/transactions/${transactionId}`);
       const transaction = response.data.data.transaction;
@@ -318,6 +324,12 @@ const Transactions = () => {
 
   const handleUpdate = async (e) => {
     e.preventDefault();
+
+    if (!canEditTransaction) {
+      toast.error('You can only view transactions');
+      return;
+    }
+
     try {
       const submitData = {
         client_id: parseInt(formData.client_id),
@@ -483,7 +495,7 @@ const Transactions = () => {
                             >
                               <i className="fas fa-eye"></i>
                             </button>
-                            {user?.role !== 'borrower' && (
+                            {canEditTransaction && (
                               <>
                                 {APPROVER_ROLES.includes(user?.role) &&
                                   transaction.status === 'pending' &&
@@ -952,16 +964,18 @@ const Transactions = () => {
                 >
                   Close
                 </button>
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  onClick={() => {
-                    setShowViewModal(false);
-                    handleEdit(selectedTransaction.id);
-                  }}
-                >
-                  <i className="fas fa-edit me-2"></i>Edit
-                </button>
+                {canEditTransaction && (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={() => {
+                      setShowViewModal(false);
+                      handleEdit(selectedTransaction.id);
+                    }}
+                  >
+                    <i className="fas fa-edit me-2"></i>Edit
+                  </button>
+                )}
               </div>
             </div>
           </div>
