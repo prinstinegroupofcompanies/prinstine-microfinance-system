@@ -15,6 +15,9 @@ const Loans = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [showModal, setShowModal] = useState(false);
   const [editingLoan, setEditingLoan] = useState(null);
+  const [pagination, setPagination] = useState({ total: 0, page: 1, limit: 20, pages: 1 }); // Loan page pagination
+  const [currentPage, setCurrentPage] = useState(1); // Loan page current page
+  const [rowsPerPage, setRowsPerPage] = useState(20); // Loan page rows per page  
   const [clients, setClients] = useState([]);
   const [collaterals, setCollaterals] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -294,13 +297,7 @@ const Loans = () => {
         toast.error(`Please fill in all required fields: ${missingFields.join(', ')}`);
         return;
       }
-      //Loan page pagination  
-      const page = parseInt(formData.page) || 1;
-      const limit = parseInt(formData.limit) || 10;
-      const offset = (page - 1) * limit;
-      submitData.page = page;
-      submitData.limit = limit;
-      submitData.offset = offset;
+
       
       // Log the data being sent for debugging
       console.log('Submitting loan data:', submitData);

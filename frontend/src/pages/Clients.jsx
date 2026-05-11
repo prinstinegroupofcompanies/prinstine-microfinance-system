@@ -790,9 +790,6 @@ const Clients = () => {
                           onChange={(e) => setFormData({ ...formData, income_currency: e.target.value })}
                         >
                           <option value="USD">USD</option>
-                          <option value="EUR">EUR</option>
-                          <option value="GBP">GBP</option>
-                          <option value="NGN">NGN</option>
                           <option value="LRD">LRD</option>
                         </select>
                       </div>
