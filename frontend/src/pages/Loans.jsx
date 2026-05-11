@@ -294,6 +294,13 @@ const Loans = () => {
         toast.error(`Please fill in all required fields: ${missingFields.join(', ')}`);
         return;
       }
+      //Loan page pagination  
+      const page = parseInt(formData.page) || 1;
+      const limit = parseInt(formData.limit) || 10;
+      const offset = (page - 1) * limit;
+      submitData.page = page;
+      submitData.limit = limit;
+      submitData.offset = offset;
       
       // Log the data being sent for debugging
       console.log('Submitting loan data:', submitData);
