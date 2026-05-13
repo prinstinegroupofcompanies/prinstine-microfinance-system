@@ -8,6 +8,7 @@ const { createRevenue, clientHasSavings, REVENUE_SOURCES } = require('../helpers
 
 const router = express.Router();
 const { LOAN_TYPES, getLoanTypeConfig } = require('../config/loanTypes');
+const { syncOverdueLoanStatuses } = require('../helpers/loanOverdueSync');
 
 // Get loan type configurations
 router.get('/types', authenticate, (req, res) => {
@@ -31,9 +32,15 @@ router.get('/types', authenticate, (req, res) => {
 router.get('/', authenticate, async (req, res) => {
   try {
     const { page = 1, limit = 10, search, status, loan_type } = req.query;
-    const offset = (page - 1) * limit;
+    const pageNum = parseInt(page, 10) || 1;
+    const limitNum = parseInt(limit, 10) || 10;
+    const offset = (pageNum - 1) * limitNum;
     const branchId = req.user?.branch_id || null;
     const userRole = req.user?.role || 'user';
+
+    if (userRole !== 'borrower') {
+      await syncOverdueLoanStatuses(db);
+    }
 
     // For borrower role, get their client_id (by user_id or email fallback)
     let clientId = null;
@@ -53,9 +60,7 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     if (search) {
-      whereClause[Op.or] = [
-        { loan_number: { [Op.like]: `%${search}%` } }
-      ];
+      whereClause[Op.or] = [{ loan_number: { [Op.like]: `%${search}%` } }];
     }
 
     if (status) whereClause.status = status;
@@ -63,25 +68,57 @@ router.get('/', authenticate, async (req, res) => {
 
     const { count, rows } = await db.Loan.findAndCountAll({
       where: whereClause,
+      distinct: true,
+      col: 'Loan.id',
       include: [
         { model: db.Client, as: 'client', required: false, attributes: ['id', 'first_name', 'last_name', 'client_number'] },
         { model: db.Branch, as: 'branch', required: false, attributes: ['id', 'name'] },
         { model: db.Collateral, as: 'collateral', required: false }
       ],
-      limit: parseInt(limit),
-      offset: parseInt(offset),
+      limit: limitNum,
+      offset,
       order: [['createdAt', 'DESC']]
+    });
+
+    const today = new Date().toISOString().split('T')[0];
+    const overdueLoanIds = rows.filter((l) => l.status === 'overdue').map((l) => l.id);
+    let daysOverdueByLoanId = {};
+    if (overdueLoanIds.length > 0) {
+      const reps = await db.LoanRepayment.findAll({
+        where: {
+          loan_id: { [Op.in]: overdueLoanIds },
+          due_date: { [Op.lt]: today },
+          status: { [Op.in]: ['pending', 'partial'] }
+        },
+        attributes: ['loan_id', 'due_date'],
+        raw: true
+      });
+      const t0 = new Date(`${today}T12:00:00`);
+      for (const r of reps) {
+        const d0 = new Date(String(r.due_date).substring(0, 10) + 'T12:00:00');
+        const days = Math.floor((t0 - d0) / 86400000);
+        const lid = r.loan_id;
+        daysOverdueByLoanId[lid] = Math.max(daysOverdueByLoanId[lid] || 0, days);
+      }
+    }
+
+    const loansPayload = rows.map((loan) => {
+      const j = typeof loan.toJSON === 'function' ? loan.toJSON() : loan;
+      if (j.status === 'overdue' && daysOverdueByLoanId[j.id] != null) {
+        j.days_overdue = daysOverdueByLoanId[j.id];
+      }
+      return j;
     });
 
     res.json({
       success: true,
       data: {
-        loans: rows,
+        loans: loansPayload,
         pagination: {
           total: count,
-          page: parseInt(page),
-          limit: parseInt(limit),
-          pages: Math.ceil(count / limit)
+          page: pageNum,
+          limit: limitNum,
+          pages: Math.max(1, Math.ceil(count / limitNum))
         }
       }
     });
@@ -1209,6 +1246,8 @@ router.post('/:id/repay', authenticate, [
       total_paid: newTotalPaid,
       status: newStatus
     });
+
+    await syncOverdueLoanStatuses(db);
 
     // Microfinance loan (client without savings): 100% of interest → company revenue
     if (interestAmount > 0) {

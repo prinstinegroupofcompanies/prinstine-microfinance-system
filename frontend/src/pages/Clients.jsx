@@ -6,8 +6,20 @@ import { useAuth } from '../contexts/AuthContext';
 import { getImageUrl } from '../utils/imageUtils';
 import { exportToPDF, exportToExcel, formatDate, formatCurrency } from '../utils/exportUtils';
 
+const CLIENT_LIST_FINANCIAL_ROLES = [
+  'admin',
+  'general_manager',
+  'branch_manager',
+  'finance',
+  'head_micro_loan',
+  'loan_officer',
+  'supervisor',
+  'micro_loan_officer'
+];
+
 const Clients = () => {
   const { user } = useAuth();
+  const showClientFinancials = CLIENT_LIST_FINANCIAL_ROLES.includes(user?.role);
   const canDeleteClient = ['admin', 'head_micro_loan'].includes(user?.role);
   const [clients, setClients] = useState([]);
   const [branches, setBranches] = useState([]);
@@ -367,6 +379,7 @@ const Clients = () => {
                     <th>City</th>
                     <th>Status</th>
                     <th>Actions</th>
+                    {showClientFinancials && <th style={{ minWidth: 240 }}>Detailed</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -408,11 +421,48 @@ const Clients = () => {
                             </button>
                           )}
                         </td>
+                        {showClientFinancials && (
+                          <td className="align-top py-2">
+                            {client.financial_summary ? (
+                              <div className="small lh-sm text-muted" style={{ maxWidth: 320 }}>
+                                <div className="mb-1">
+                                  <span className="text-dark fw-semibold">Savings</span>{' '}
+                                  USD {formatCurrency(client.financial_summary.savings_usd || 0, 'USD')},{' '}
+                                  LRD {formatCurrency(client.financial_summary.savings_lrd || 0, 'LRD')}
+                                </div>
+                                <div className="mb-1">
+                                  <span className="text-dark fw-semibold">Current loans</span>{' '}
+                                  USD {formatCurrency(client.financial_summary.current_loans_usd || 0, 'USD')},{' '}
+                                  LRD {formatCurrency(client.financial_summary.current_loans_lrd || 0, 'LRD')}
+                                </div>
+                                <div className="mb-1">
+                                  <span className="text-dark fw-semibold">Outstanding loans</span>{' '}
+                                  USD {formatCurrency(client.financial_summary.outstanding_loans_usd || 0, 'USD')},{' '}
+                                  LRD {formatCurrency(client.financial_summary.outstanding_loans_lrd || 0, 'LRD')}
+                                </div>
+                                <div className="mb-1">
+                                  <span className="text-dark fw-semibold">Outstanding dues</span>{' '}
+                                  {formatCurrency(
+                                    client.financial_summary.outstanding_dues || 0,
+                                    client.financial_summary.outstanding_dues_currency || 'USD'
+                                  )}
+                                </div>
+                                <div>
+                                  <span className="text-dark fw-semibold">Fines / penalties</span>{' '}
+                                  USD {formatCurrency(client.financial_summary.fines_penalties_usd || 0, 'USD')},{' '}
+                                  LRD {formatCurrency(client.financial_summary.fines_penalties_lrd || 0, 'LRD')}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-muted small">—</span>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="7" className="text-center text-muted py-5">
+                      <td colSpan={showClientFinancials ? 8 : 7} className="text-center text-muted py-5">
                         <i className="fas fa-users fa-3x mb-3 d-block"></i>
                         No clients found
                       </td>

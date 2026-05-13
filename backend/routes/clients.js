@@ -8,13 +8,26 @@ const path = require('path');
 const fs = require('fs');
 const { Op } = require('sequelize');
 const { getBorrowerClient } = require('../helpers/borrower');
+const { getFinancialSummariesByClientIds } = require('../helpers/clientListFinancials');
 
 const router = express.Router();
+
+/** Staff roles that see per-client financials on the client list when requested */
+const CLIENT_LIST_FINANCIAL_ROLES = [
+  'admin',
+  'general_manager',
+  'branch_manager',
+  'finance',
+  'head_micro_loan',
+  'loan_officer',
+  'supervisor',
+  'micro_loan_officer'
+];
 
 // Get all clients
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { page = 1, limit, search, status, kyc_status, all = false } = req.query;
+    const { page = 1, limit, search, status, kyc_status, all = false, include_financials } = req.query;
     // If 'all' is true or no limit specified, fetch all clients (up to 10000 for safety)
     const parsedLimit = parseInt(limit, 10);
     const safeLimit = Number.isInteger(parsedLimit) && parsedLimit > 0 ? parsedLimit : 10000;
@@ -70,6 +83,10 @@ router.get('/', authenticate, async (req, res) => {
       whereClause = baseConditions;
     }
 
+    const wantFinancials =
+      include_financials === 'true' &&
+      CLIENT_LIST_FINANCIAL_ROLES.includes(userRole);
+
     const { count, rows } = await db.Client.findAndCountAll({
       where: whereClause,
       include: [
@@ -81,10 +98,40 @@ router.get('/', authenticate, async (req, res) => {
       order: [['createdAt', 'DESC']]
     });
 
+    let clientsPayload = rows.map((c) => (typeof c.toJSON === 'function' ? c.toJSON() : c));
+
+    if (wantFinancials && clientsPayload.length > 0) {
+      const ids = clientsPayload.map((c) => c.id);
+      const summaries = await getFinancialSummariesByClientIds(db, ids);
+      clientsPayload = clientsPayload.map((c) => {
+        const s = summaries[c.id] || {
+          USD: { savings: 0, current_loans_amount: 0, outstanding_loans: 0, penalties: 0 },
+          LRD: { savings: 0, current_loans_amount: 0, outstanding_loans: 0, penalties: 0 }
+        };
+        const duesCurrency = String(c.dues_currency || 'USD').toUpperCase() === 'LRD' ? 'LRD' : 'USD';
+        const outstandingDues = Math.abs(Math.min(0, parseFloat(c.total_dues || 0)));
+        return {
+          ...c,
+          financial_summary: {
+            savings_usd: s.USD.savings,
+            savings_lrd: s.LRD.savings,
+            current_loans_usd: s.USD.current_loans_amount,
+            current_loans_lrd: s.LRD.current_loans_amount,
+            outstanding_loans_usd: s.USD.outstanding_loans,
+            outstanding_loans_lrd: s.LRD.outstanding_loans,
+            outstanding_dues: outstandingDues,
+            outstanding_dues_currency: duesCurrency,
+            fines_penalties_usd: s.USD.penalties,
+            fines_penalties_lrd: s.LRD.penalties
+          }
+        };
+      });
+    }
+
     res.json({
       success: true,
       data: {
-        clients: rows,
+        clients: wantFinancials ? clientsPayload : rows,
         pagination: {
           total: count,
           page: parseInt(page),

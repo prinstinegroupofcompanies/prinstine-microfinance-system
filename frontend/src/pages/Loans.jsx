@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../config/axios';
 import { toast } from 'react-toastify';
 import { Link } from 'react-router-dom';
@@ -55,19 +55,56 @@ const Loans = () => {
   });
 
   useEffect(() => {
-    fetchLoans();
     fetchClients();
     fetchCollaterals();
     fetchBranches();
     fetchLoanTypes();
-    
-    // Real-time updates every 5 seconds
+  }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter]);
+
+  const fetchLoans = useCallback(async () => {
+    try {
+      const params = { page: currentPage, limit: rowsPerPage };
+      if (search) params.search = search;
+      if (statusFilter !== 'all') params.status = statusFilter;
+
+      const response = await apiClient.get('/api/loans', { params });
+      setLoans(response.data.data.loans || []);
+      setPagination(
+        response.data.data.pagination || {
+          total: 0,
+          page: currentPage,
+          limit: rowsPerPage,
+          pages: 1
+        }
+      );
+      setLoading(false);
+    } catch (error) {
+      console.error('Failed to fetch loans:', error);
+      toast.error('Failed to load loans');
+      setLoading(false);
+    }
+  }, [search, statusFilter, currentPage, rowsPerPage]);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchLoans();
+  }, [fetchLoans]);
+
+  useEffect(() => {
     const interval = setInterval(() => {
       fetchLoans();
     }, 5000);
-    
     return () => clearInterval(interval);
-  }, [search, statusFilter]);
+  }, [fetchLoans]);
+
+  useEffect(() => {
+    const tp = Math.max(1, pagination.pages || 1);
+    if (currentPage > tp) setCurrentPage(tp);
+  }, [currentPage, pagination.pages]);
 
   const fetchLoanTypes = async () => {
     try {
@@ -75,22 +112,6 @@ const Loans = () => {
       setLoanTypes(response.data.data.loan_types || {});
     } catch (error) {
       console.error('Failed to fetch loan types:', error);
-    }
-  };
-
-  const fetchLoans = async () => {
-    try {
-      const params = {};
-      if (search) params.search = search;
-      if (statusFilter !== 'all') params.status = statusFilter;
-      
-      const response = await apiClient.get('/api/loans', { params });
-      setLoans(response.data.data.loans || []);
-      setLoading(false);
-    } catch (error) {
-      console.error('Failed to fetch loans:', error);
-      toast.error('Failed to load loans');
-      setLoading(false);
     }
   };
 
@@ -440,38 +461,58 @@ const Loans = () => {
     }
   };
 
-  const handleExportPDF = () => {
-    const columns = [
-      { key: 'loan_number', header: 'Loan Number' },
-      { key: 'client', header: 'Client', format: (value) => value ? `${value.first_name} ${value.last_name}` : '-' },
-      { key: 'loan_type', header: 'Loan Type' },
-      { key: 'amount', header: 'Amount', format: (value, row) => formatCurrency(value, row.currency || 'USD') },
-      { key: 'interest_rate', header: 'Interest Rate (%)' },
-      { key: 'term_months', header: 'Term (Months)' },
-      { key: 'outstanding_balance', header: 'Outstanding Balance', format: (value, row) => formatCurrency(value, row.currency || 'USD') },
-      { key: 'status', header: 'Status' },
-      { key: 'disbursement_date', header: 'Disbursement Date', format: formatDate },
-      { key: 'createdAt', header: 'Created At', format: formatDate }
-    ];
-    exportToPDF(loans, columns, 'Loans Report', 'loans_report');
-    toast.success('Loans exported to PDF successfully!');
+  const fetchLoansForExport = async () => {
+    const params = { page: 1, limit: 10000 };
+    if (search) params.search = search;
+    if (statusFilter !== 'all') params.status = statusFilter;
+    const response = await apiClient.get('/api/loans', { params });
+    return response.data.data.loans || [];
   };
 
-  const handleExportExcel = () => {
-    const columns = [
-      { key: 'loan_number', header: 'Loan Number' },
-      { key: 'client', header: 'Client', format: (value) => value ? `${value.first_name} ${value.last_name}` : '-' },
-      { key: 'loan_type', header: 'Loan Type' },
-      { key: 'amount', header: 'Amount', format: (value, row) => formatCurrency(value, row.currency || 'USD') },
-      { key: 'interest_rate', header: 'Interest Rate (%)' },
-      { key: 'term_months', header: 'Term (Months)' },
-      { key: 'outstanding_balance', header: 'Outstanding Balance', format: (value, row) => formatCurrency(value, row.currency || 'USD') },
-      { key: 'status', header: 'Status' },
-      { key: 'disbursement_date', header: 'Disbursement Date', format: formatDate },
-      { key: 'createdAt', header: 'Created At', format: formatDate }
-    ];
-    exportToExcel(loans, columns, 'Loans', 'loans_report');
-    toast.success('Loans exported to Excel successfully!');
+  const handleExportPDF = async () => {
+    try {
+      const rows = user?.role === 'borrower' ? loans : await fetchLoansForExport();
+      const columns = [
+        { key: 'loan_number', header: 'Loan Number' },
+        { key: 'client', header: 'Client', format: (value) => value ? `${value.first_name} ${value.last_name}` : '-' },
+        { key: 'loan_type', header: 'Loan Type' },
+        { key: 'amount', header: 'Amount', format: (value, row) => formatCurrency(value, row.currency || 'USD') },
+        { key: 'interest_rate', header: 'Interest Rate (%)' },
+        { key: 'term_months', header: 'Term (Months)' },
+        { key: 'outstanding_balance', header: 'Outstanding Balance', format: (value, row) => formatCurrency(value, row.currency || 'USD') },
+        { key: 'status', header: 'Status' },
+        { key: 'disbursement_date', header: 'Disbursement Date', format: formatDate },
+        { key: 'createdAt', header: 'Created At', format: formatDate }
+      ];
+      exportToPDF(rows, columns, 'Loans Report', 'loans_report');
+      toast.success('Loans exported to PDF successfully!');
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to export loans');
+    }
+  };
+
+  const handleExportExcel = async () => {
+    try {
+      const rows = user?.role === 'borrower' ? loans : await fetchLoansForExport();
+      const columns = [
+        { key: 'loan_number', header: 'Loan Number' },
+        { key: 'client', header: 'Client', format: (value) => value ? `${value.first_name} ${value.last_name}` : '-' },
+        { key: 'loan_type', header: 'Loan Type' },
+        { key: 'amount', header: 'Amount', format: (value, row) => formatCurrency(value, row.currency || 'USD') },
+        { key: 'interest_rate', header: 'Interest Rate (%)' },
+        { key: 'term_months', header: 'Term (Months)' },
+        { key: 'outstanding_balance', header: 'Outstanding Balance', format: (value, row) => formatCurrency(value, row.currency || 'USD') },
+        { key: 'status', header: 'Status' },
+        { key: 'disbursement_date', header: 'Disbursement Date', format: formatDate },
+        { key: 'createdAt', header: 'Created At', format: formatDate }
+      ];
+      exportToExcel(rows, columns, 'Loans', 'loans_report');
+      toast.success('Loans exported to Excel successfully!');
+    } catch (e) {
+      console.error(e);
+      toast.error('Failed to export loans');
+    }
   };
 
   const handleRepay = async (e) => {
@@ -638,6 +679,12 @@ const Loans = () => {
     return badges[status] || 'secondary';
   };
 
+  const totalPages = Math.max(1, pagination.pages || 1);
+  const pageButtons = [];
+  const startPage = Math.max(1, currentPage - 2);
+  const endPage = Math.min(totalPages, currentPage + 2);
+  for (let p = startPage; p <= endPage; p += 1) pageButtons.push(p);
+
   // Filter collaterals by selected client
   const clientCollaterals = formData.client_id 
     ? collaterals.filter(c => c.client_id === parseInt(formData.client_id))
@@ -727,6 +774,7 @@ const Loans = () => {
               </div>
             </div>
           ) : (
+            <>
             <div className="table-responsive">
               <table className="table table-hover mb-0">
                 <thead>
@@ -752,7 +800,7 @@ const Loans = () => {
                         <td>
                           {loan.client?.first_name} {loan.client?.last_name}
                         </td>
-                        <td>${parseFloat(loan.amount).toLocaleString()}</td>
+                        <td>{formatCurrency(parseFloat(loan.amount || 0), loan.currency || 'USD')}</td>
                         <td>{loan.interest_rate}%</td>
                         <td>
                           <span className="badge bg-info">
@@ -760,10 +808,13 @@ const Loans = () => {
                           </span>
                         </td>
                         <td>{loan.term_months} months</td>
-                        <td>${parseFloat(loan.outstanding_balance || 0).toLocaleString()}</td>
+                        <td>{formatCurrency(parseFloat(loan.outstanding_balance || 0), loan.currency || 'USD')}</td>
                         <td>
                           <span className={`badge bg-${getStatusBadge(loan.status)}`}>
                             {loan.status}
+                            {loan.status === 'overdue' && loan.days_overdue != null
+                              ? ` (${loan.days_overdue}d)`
+                              : ''}
                           </span>
                         </td>
                         <td>
@@ -802,7 +853,7 @@ const Loans = () => {
                                 <i className="fas fa-money-bill-wave"></i>
                               </button>
                             )}
-                            {(loan.status === 'active' || loan.status === 'disbursed') && (
+                            {(loan.status === 'active' || loan.status === 'disbursed' || loan.status === 'overdue') && (
                               <>
                                 <button
                                   className="btn btn-sm btn-outline-success"
@@ -847,6 +898,57 @@ const Loans = () => {
                 </tbody>
               </table>
             </div>
+            {loans.length > 0 && (
+              <div className="d-flex justify-content-between align-items-center p-3 border-top flex-wrap gap-2">
+                <small className="text-muted">
+                  Showing {pagination.total === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1}
+                  -
+                  {Math.min(currentPage * rowsPerPage, pagination.total || 0)} of {pagination.total || 0}
+                </small>
+                <div className="d-flex align-items-center gap-2 flex-wrap">
+                  <select
+                    className="form-select form-select-sm"
+                    value={rowsPerPage}
+                    onChange={(e) => {
+                      setRowsPerPage(parseInt(e.target.value, 10));
+                      setCurrentPage(1);
+                    }}
+                    style={{ width: 90 }}
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                  <button type="button" className="btn btn-sm btn-outline-secondary" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}>Prev</button>
+                  {startPage > 1 && (
+                    <>
+                      <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setCurrentPage(1)}>1</button>
+                      {startPage > 2 && <span className="text-muted small">...</span>}
+                    </>
+                  )}
+                  {pageButtons.map((p) => (
+                    <button
+                      type="button"
+                      key={p}
+                      className={`btn btn-sm ${p === currentPage ? 'btn-primary' : 'btn-outline-secondary'}`}
+                      onClick={() => setCurrentPage(p)}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                  {endPage < totalPages && (
+                    <>
+                      {endPage < totalPages - 1 && <span className="text-muted small">...</span>}
+                      <button type="button" className="btn btn-sm btn-outline-secondary" onClick={() => setCurrentPage(totalPages)}>{totalPages}</button>
+                    </>
+                  )}
+                  <span className="small text-muted">Page {currentPage} / {totalPages}</span>
+                  <button type="button" className="btn btn-sm btn-outline-secondary" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}>Next</button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </div>
       </div>
