@@ -7,6 +7,12 @@ import Receipt from '../components/Receipt';
 import { exportToPDF, exportToExcel, formatDate, formatCurrency } from '../utils/exportUtils';
 import { APPROVER_ROLES } from '../utils/permissions';
 
+const getApiErrorMessage = (error, fallback) =>
+  error?.response?.data?.message ||
+  error?.response?.data?.error ||
+  error?.message ||
+  fallback;
+
 const Loans = () => {
   const { user } = useAuth();
   const [loans, setLoans] = useState([]);
@@ -65,38 +71,44 @@ const Loans = () => {
     setCurrentPage(1);
   }, [search, statusFilter]);
 
-  const fetchLoans = useCallback(async () => {
+  const fetchLoans = useCallback(async (options = {}) => {
+    const { silent = false } = options;
     try {
+      if (!silent) setLoading(true);
       const params = { page: currentPage, limit: rowsPerPage };
       if (search) params.search = search;
       if (statusFilter !== 'all') params.status = statusFilter;
 
       const response = await apiClient.get('/api/loans', { params });
-      setLoans(response.data.data.loans || []);
+      if (response.data?.success === false) {
+        throw new Error(response.data?.message || 'Failed to load loans');
+      }
+      setLoans(response.data?.data?.loans || []);
       setPagination(
-        response.data.data.pagination || {
+        response.data?.data?.pagination || {
           total: 0,
           page: currentPage,
           limit: rowsPerPage,
           pages: 1
         }
       );
-      setLoading(false);
     } catch (error) {
       console.error('Failed to fetch loans:', error);
-      toast.error('Failed to load loans');
-      setLoading(false);
+      if (!silent) {
+        toast.error(getApiErrorMessage(error, 'Failed to load loans'));
+      }
+    } finally {
+      if (!silent) setLoading(false);
     }
   }, [search, statusFilter, currentPage, rowsPerPage]);
 
   useEffect(() => {
-    setLoading(true);
     fetchLoans();
   }, [fetchLoans]);
 
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchLoans();
+      fetchLoans({ silent: true });
     }, 5000);
     return () => clearInterval(interval);
   }, [fetchLoans]);

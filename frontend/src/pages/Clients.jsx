@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import apiClient from '../config/axios';
 import { toast } from 'react-toastify';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { getImageUrl } from '../utils/imageUtils';
 import { exportToPDF, exportToExcel, formatDate, formatCurrency } from '../utils/exportUtils';
+
+const getApiErrorMessage = (error, fallback) =>
+  error?.response?.data?.message ||
+  error?.response?.data?.error ||
+  error?.message ||
+  fallback;
 
 const CLIENT_LIST_FINANCIAL_ROLES = [
   'admin',
@@ -63,38 +69,58 @@ const Clients = () => {
   const [profileImagePreview, setProfileImagePreview] = useState(null);
 
   useEffect(() => {
-    fetchClients();
-  }, [search, statusFilter, currentPage, rowsPerPage]);
-
-  useEffect(() => {
     setCurrentPage(1);
   }, [search, statusFilter]);
 
-  useEffect(() => {
-    fetchBranches();
-    // Real-time updates every 5 seconds
-    const interval = setInterval(() => {
-      fetchClients();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const fetchClients = async () => {
+  const fetchClients = useCallback(async (options = {}) => {
+    const { silent = false } = options;
     try {
+      if (!silent) setLoading(true);
       const params = { page: currentPage, limit: rowsPerPage };
       if (search) params.search = search;
       if (statusFilter !== 'all') params.status = statusFilter;
-      
+      if (showClientFinancials) params.include_financials = 'true';
+
       const response = await apiClient.get('/api/clients', { params });
-      setClients(response.data.data.clients || []);
-      setPagination(response.data.data.pagination || { total: 0, page: currentPage, limit: rowsPerPage, pages: 1 });
-      setLoading(false);
+      if (response.data?.success === false) {
+        throw new Error(response.data?.message || 'Failed to load clients');
+      }
+      const list = response.data?.data?.clients || [];
+      setClients(
+        list.map((c) => ({
+          ...c,
+          financial_summary: c.financial_summary ?? null
+        }))
+      );
+      setPagination(
+        response.data.data.pagination || {
+          total: 0,
+          page: currentPage,
+          limit: rowsPerPage,
+          pages: 1
+        }
+      );
     } catch (error) {
       console.error('Failed to fetch clients:', error);
-      toast.error('Failed to load clients');
-      setLoading(false);
+      if (!silent) {
+        toast.error(getApiErrorMessage(error, 'Failed to load clients'));
+      }
+    } finally {
+      if (!silent) setLoading(false);
     }
-  };
+  }, [search, statusFilter, currentPage, rowsPerPage, showClientFinancials]);
+
+  useEffect(() => {
+    fetchClients();
+  }, [fetchClients]);
+
+  useEffect(() => {
+    fetchBranches();
+    const interval = setInterval(() => {
+      fetchClients({ silent: true });
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [fetchClients]);
 
   const fetchBranches = async () => {
     try {
@@ -423,7 +449,7 @@ const Clients = () => {
                         </td>
                         {showClientFinancials && (
                           <td className="align-top py-2">
-                            {client.financial_summary ? (
+                            {client.financial_summary != null ? (
                               <div className="small lh-sm text-muted" style={{ maxWidth: 320 }}>
                                 <div className="mb-1">
                                   <span className="text-dark fw-semibold">Savings</span>{' '}

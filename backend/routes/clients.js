@@ -101,37 +101,60 @@ router.get('/', authenticate, async (req, res) => {
     let clientsPayload = rows.map((c) => (typeof c.toJSON === 'function' ? c.toJSON() : c));
 
     if (wantFinancials && clientsPayload.length > 0) {
-      const ids = clientsPayload.map((c) => c.id);
-      const summaries = await getFinancialSummariesByClientIds(db, ids);
-      clientsPayload = clientsPayload.map((c) => {
-        const s = summaries[c.id] || {
-          USD: { savings: 0, current_loans_amount: 0, outstanding_loans: 0, penalties: 0 },
-          LRD: { savings: 0, current_loans_amount: 0, outstanding_loans: 0, penalties: 0 }
-        };
-        const duesCurrency = String(c.dues_currency || 'USD').toUpperCase() === 'LRD' ? 'LRD' : 'USD';
-        const outstandingDues = Math.abs(Math.min(0, parseFloat(c.total_dues || 0)));
-        return {
-          ...c,
-          financial_summary: {
-            savings_usd: s.USD.savings,
-            savings_lrd: s.LRD.savings,
-            current_loans_usd: s.USD.current_loans_amount,
-            current_loans_lrd: s.LRD.current_loans_amount,
-            outstanding_loans_usd: s.USD.outstanding_loans,
-            outstanding_loans_lrd: s.LRD.outstanding_loans,
-            outstanding_dues: outstandingDues,
-            outstanding_dues_currency: duesCurrency,
-            fines_penalties_usd: s.USD.penalties,
-            fines_penalties_lrd: s.LRD.penalties
-          }
-        };
-      });
+      try {
+        const ids = clientsPayload.map((c) => c.id);
+        const summaries = await getFinancialSummariesByClientIds(db, ids);
+        clientsPayload = clientsPayload.map((c) => {
+          const s = summaries[c.id] || {
+            USD: { savings: 0, current_loans_amount: 0, outstanding_loans: 0, penalties: 0 },
+            LRD: { savings: 0, current_loans_amount: 0, outstanding_loans: 0, penalties: 0 }
+          };
+          const duesCurrency = String(c.dues_currency || 'USD').toUpperCase() === 'LRD' ? 'LRD' : 'USD';
+          const outstandingDues = Math.abs(Math.min(0, parseFloat(c.total_dues || 0)));
+          return {
+            ...c,
+            financial_summary: {
+              savings_usd: s.USD.savings,
+              savings_lrd: s.LRD.savings,
+              current_loans_usd: s.USD.current_loans_amount,
+              current_loans_lrd: s.LRD.current_loans_amount,
+              outstanding_loans_usd: s.USD.outstanding_loans,
+              outstanding_loans_lrd: s.LRD.outstanding_loans,
+              outstanding_dues: outstandingDues,
+              outstanding_dues_currency: duesCurrency,
+              fines_penalties_usd: s.USD.penalties,
+              fines_penalties_lrd: s.LRD.penalties
+            }
+          };
+        });
+      } catch (finErr) {
+        console.error('Client list financial summaries failed:', finErr.message);
+        clientsPayload = clientsPayload.map((c) => {
+          const duesCurrency = String(c.dues_currency || 'USD').toUpperCase() === 'LRD' ? 'LRD' : 'USD';
+          const outstandingDues = Math.abs(Math.min(0, parseFloat(c.total_dues || 0)));
+          return {
+            ...c,
+            financial_summary: {
+              savings_usd: 0,
+              savings_lrd: 0,
+              current_loans_usd: 0,
+              current_loans_lrd: 0,
+              outstanding_loans_usd: 0,
+              outstanding_loans_lrd: 0,
+              outstanding_dues: outstandingDues,
+              outstanding_dues_currency: duesCurrency,
+              fines_penalties_usd: 0,
+              fines_penalties_lrd: 0
+            }
+          };
+        });
+      }
     }
 
     res.json({
       success: true,
       data: {
-        clients: wantFinancials ? clientsPayload : rows,
+        clients: clientsPayload,
         pagination: {
           total: count,
           page: parseInt(page),

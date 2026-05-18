@@ -39,7 +39,11 @@ router.get('/', authenticate, async (req, res) => {
     const userRole = req.user?.role || 'user';
 
     if (userRole !== 'borrower') {
-      await syncOverdueLoanStatuses(db);
+      try {
+        await syncOverdueLoanStatuses(db);
+      } catch (syncErr) {
+        console.error('Overdue loan sync failed (continuing with loan list):', syncErr.message);
+      }
     }
 
     // For borrower role, get their client_id (by user_id or email fallback)
@@ -68,8 +72,6 @@ router.get('/', authenticate, async (req, res) => {
 
     const { count, rows } = await db.Loan.findAndCountAll({
       where: whereClause,
-      distinct: true,
-      col: 'Loan.id',
       include: [
         { model: db.Client, as: 'client', required: false, attributes: ['id', 'first_name', 'last_name', 'client_number'] },
         { model: db.Branch, as: 'branch', required: false, attributes: ['id', 'name'] },
