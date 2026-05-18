@@ -129,7 +129,13 @@ module.exports = (sequelize) => {
       allowNull: true,
       get() {
         const value = this.getDataValue('repayment_schedule');
-        return value ? JSON.parse(value) : null;
+        if (value == null || value === '') return null;
+        if (typeof value === 'object') return value;
+        try {
+          return JSON.parse(value);
+        } catch {
+          return null;
+        }
       },
       set(value) {
         this.setDataValue('repayment_schedule', value ? JSON.stringify(value) : null);

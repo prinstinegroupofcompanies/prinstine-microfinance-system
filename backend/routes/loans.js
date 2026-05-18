@@ -70,13 +70,22 @@ router.get('/', authenticate, async (req, res) => {
     if (status) whereClause.status = status;
     if (loan_type) whereClause.loan_type = loan_type;
 
-    const { count, rows } = await db.Loan.findAndCountAll({
+    const listIncludes = [
+      { model: db.Client, as: 'client', required: false, attributes: ['id', 'first_name', 'last_name', 'client_number'] },
+      { model: db.Branch, as: 'branch', required: false, attributes: ['id', 'name'] },
+      {
+        model: db.Collateral,
+        as: 'collateral',
+        required: false,
+        attributes: ['id', 'type', 'description', 'estimated_value', 'currency', 'status']
+      }
+    ];
+
+    const count = await db.Loan.count({ where: whereClause });
+    const rows = await db.Loan.findAll({
       where: whereClause,
-      include: [
-        { model: db.Client, as: 'client', required: false, attributes: ['id', 'first_name', 'last_name', 'client_number'] },
-        { model: db.Branch, as: 'branch', required: false, attributes: ['id', 'name'] },
-        { model: db.Collateral, as: 'collateral', required: false }
-      ],
+      attributes: { exclude: ['repayment_schedule'] },
+      include: listIncludes,
       limit: limitNum,
       offset,
       order: [['createdAt', 'DESC']]
@@ -84,20 +93,22 @@ router.get('/', authenticate, async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
     const overdueLoanIds = rows.filter((l) => l.status === 'overdue').map((l) => l.id);
-    let daysOverdueByLoanId = {};
+    const daysOverdueByLoanId = {};
     if (overdueLoanIds.length > 0) {
       const reps = await db.LoanRepayment.findAll({
         where: {
           loan_id: { [Op.in]: overdueLoanIds },
           due_date: { [Op.lt]: today },
-          status: { [Op.in]: ['pending', 'partial'] }
+          status: { [Op.in]: ['pending', 'partial', 'overdue'] }
         },
         attributes: ['loan_id', 'due_date'],
         raw: true
       });
       const t0 = new Date(`${today}T12:00:00`);
       for (const r of reps) {
+        if (!r.due_date) continue;
         const d0 = new Date(String(r.due_date).substring(0, 10) + 'T12:00:00');
+        if (Number.isNaN(d0.getTime())) continue;
         const days = Math.floor((t0 - d0) / 86400000);
         const lid = r.loan_id;
         daysOverdueByLoanId[lid] = Math.max(daysOverdueByLoanId[lid] || 0, days);
@@ -105,7 +116,20 @@ router.get('/', authenticate, async (req, res) => {
     }
 
     const loansPayload = rows.map((loan) => {
-      const j = typeof loan.toJSON === 'function' ? loan.toJSON() : loan;
+      let j;
+      try {
+        j = typeof loan.get === 'function' ? loan.get({ plain: true }) : loan;
+      } catch (serializeErr) {
+        console.error(`Loan ${loan.id} serialize error:`, serializeErr.message);
+        j = {
+          id: loan.id,
+          loan_number: loan.loan_number,
+          status: loan.status,
+          amount: loan.amount,
+          currency: loan.currency,
+          outstanding_balance: loan.outstanding_balance
+        };
+      }
       if (j.status === 'overdue' && daysOverdueByLoanId[j.id] != null) {
         j.days_overdue = daysOverdueByLoanId[j.id];
       }
@@ -127,10 +151,11 @@ router.get('/', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Get loans error:', error);
     console.error('Error stack:', error.stack);
+    const detail = error?.message || 'Internal server error';
     res.status(500).json({
       success: false,
-      message: 'Failed to fetch loans',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      message: `Failed to fetch loans: ${detail}`,
+      error: detail
     });
   }
 });

@@ -95,7 +95,11 @@ const Loans = () => {
     } catch (error) {
       console.error('Failed to fetch loans:', error);
       if (!silent) {
-        toast.error(getApiErrorMessage(error, 'Failed to load loans'));
+        const msg = getApiErrorMessage(error, 'Failed to load loans');
+        toast.error(msg);
+        if (error?.response?.status === 500) {
+          console.error('Loans API 500 detail:', error?.response?.data);
+        }
       }
     } finally {
       if (!silent) setLoading(false);

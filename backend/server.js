@@ -365,6 +365,13 @@ db.sequelize.authenticate()
              console.error('⚠️  Currency migration warning (non-critical):', currencyError.message);
              // Continue even if migration fails - it might already be applied
            }
+
+           try {
+             const addOverdueLoanStatus = require('./scripts/add-overdue-loan-status');
+             await addOverdueLoanStatus();
+           } catch (overdueStatusError) {
+             console.error('⚠️  Overdue status migration warning (non-critical):', overdueStatusError.message);
+           }
     
     return Promise.resolve();
   })
