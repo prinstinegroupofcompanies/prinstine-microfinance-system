@@ -13,3 +13,11 @@ node backend/scripts/restore-savings-initial-deposits.js
 ```
 
 Or call `POST /api/savings/restore-initial-deposits` as admin, head micro loan, head micro finance, or finance (after deploying the updated restore logic).
+
+Inspect one account before/after restore:
+
+```http
+GET /api/savings/inspect-restore/SAV00000149
+```
+
+This returns current balance, computed target balance, and attributed transactions so you can verify opening deposits are included.

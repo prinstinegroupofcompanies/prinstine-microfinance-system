@@ -5,7 +5,8 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { getBorrowerClient } = require('../helpers/borrower');
 const {
   INITIAL_OPENING_PURPOSE,
-  restoreInitialDepositsToSavingsBalances
+  restoreInitialDepositsToSavingsBalances,
+  inspectSavingsAccountRestore
 } = require('../helpers/savingsBalance');
 
 const router = express.Router();
@@ -38,6 +39,28 @@ router.post(
       return res.status(500).json({
         success: false,
         message: 'Failed to restore initial deposits',
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      });
+    }
+  }
+);
+
+// Inspect restore calculation for one account (support).
+router.get(
+  '/inspect-restore/:accountNumber',
+  authorize('admin', 'head_micro_loan', 'head_micro_finance', 'finance'),
+  async (req, res) => {
+    try {
+      const report = await inspectSavingsAccountRestore(db, req.params.accountNumber);
+      if (!report.found) {
+        return res.status(404).json({ success: false, message: 'Savings account not found' });
+      }
+      return res.json({ success: true, data: report });
+    } catch (error) {
+      console.error('Inspect restore error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to inspect account',
         error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
       });
     }

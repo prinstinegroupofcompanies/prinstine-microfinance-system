@@ -9,6 +9,15 @@ function roundMoney(value) {
   return Math.round((parseFloat(value || 0) + Number.EPSILON) * 100) / 100;
 }
 
+function normalizeCurrency(currency) {
+  return String(currency || 'USD').toUpperCase() === 'LRD' ? 'LRD' : 'USD';
+}
+
+function textLike(sequelize, value) {
+  const dialect = sequelize?.getDialect?.() || 'postgres';
+  return dialect === 'postgres' ? { [Op.iLike]: value } : { [Op.like]: value };
+}
+
 function isInitialOpeningDeposit(txn) {
   if (!txn || txn.type !== 'deposit') return false;
   if (txn.purpose === INITIAL_OPENING_PURPOSE) return true;
@@ -27,6 +36,15 @@ function openingDescriptionMatchesAccount(description, accountNumber) {
   const d = description.toLowerCase();
   const num = String(accountNumber).toLowerCase();
   return d.includes(num) || d.startsWith('initial deposit for ');
+}
+
+function transactionMatchesAccount(txn, account) {
+  if (!txn || !account) return false;
+  if (txn.savings_account_id === account.id) return true;
+  if (txn.savings_account_id && txn.savings_account_id !== account.id) return false;
+  if (txn.client_id !== account.client_id) return false;
+  if (normalizeCurrency(txn.currency) !== normalizeCurrency(account.currency)) return false;
+  return openingDescriptionMatchesAccount(txn.description, account.account_number);
 }
 
 /**
@@ -54,216 +72,382 @@ async function applySavingsBalanceChange(db, savingsAccountId, type, amount, dir
   await account.update({ balance: Math.max(0, roundMoney(next)) }, queryOptions);
 }
 
-function textLike(sequelize, value) {
-  const dialect = sequelize?.getDialect?.() || 'postgres';
-  return dialect === 'postgres' ? { [Op.iLike]: value } : { [Op.like]: value };
+async function getClientAccountsForCurrency(db, clientId, currency, options = {}) {
+  const queryOptions = options.transaction ? { transaction: options.transaction } : {};
+  return db.SavingsAccount.findAll({
+    where: { client_id: clientId, currency: normalizeCurrency(currency) },
+    attributes: ['id', 'client_id', 'account_number', 'currency', 'createdAt'],
+    order: [['createdAt', 'ASC']],
+    ...queryOptions
+  });
 }
 
-async function findOpeningDepositTransactions(db, account, options = {}) {
+/**
+ * Pick which savings account an orphan client deposit belongs to.
+ */
+function pickAccountForOrphanDeposit(txn, accounts) {
+  if (!accounts.length) return null;
+
+  const desc = (txn.description || '').toLowerCase();
+  const byNumber = accounts.find((a) => desc.includes(String(a.account_number).toLowerCase()));
+  if (byNumber) return byNumber;
+
+  if (isInitialOpeningDeposit(txn) || txn.purpose === INITIAL_OPENING_PURPOSE) {
+    const byInitialDesc = accounts.find((a) => openingDescriptionMatchesAccount(txn.description, a.account_number));
+    if (byInitialDesc) return byInitialDesc;
+  }
+
+  if (accounts.length === 1) return accounts[0];
+
+  const txnTime = new Date(txn.transaction_date || txn.createdAt || 0).getTime();
+  let best = accounts[0];
+  let bestDiff = Math.abs(new Date(best.createdAt).getTime() - txnTime);
+  for (const acct of accounts) {
+    const diff = Math.abs(new Date(acct.createdAt).getTime() - txnTime);
+    if (diff < bestDiff) {
+      bestDiff = diff;
+      best = acct;
+    }
+  }
+  return best;
+}
+
+/**
+ * Link orphan deposit/withdrawal rows to the correct savings account (by client + currency).
+ */
+async function relinkOrphanSavingsTransactions(db, options = {}) {
+  const queryOptions = options.transaction ? { transaction: options.transaction } : {};
+  const orphans = await db.Transaction.findAll({
+    where: {
+      savings_account_id: null,
+      client_id: { [Op.ne]: null },
+      type: { [Op.in]: BALANCE_TX_TYPES }
+    },
+    attributes: ['id', 'client_id', 'currency', 'description', 'purpose', 'transaction_date', 'createdAt', 'type'],
+    ...queryOptions
+  });
+
+  const clientIds = [...new Set(orphans.map((t) => t.client_id).filter(Boolean))];
+  const accountsByClient = new Map();
+
+  for (const clientId of clientIds) {
+    const accounts = await db.SavingsAccount.findAll({
+      where: { client_id: clientId },
+      attributes: ['id', 'client_id', 'account_number', 'currency', 'createdAt'],
+      order: [['createdAt', 'ASC']],
+      ...queryOptions
+    });
+    accountsByClient.set(clientId, accounts);
+  }
+
+  let linked = 0;
+  for (const txn of orphans) {
+    const accounts = (accountsByClient.get(txn.client_id) || []).filter(
+      (a) => normalizeCurrency(a.currency) === normalizeCurrency(txn.currency)
+    );
+    const target = pickAccountForOrphanDeposit(txn, accounts);
+    if (target) {
+      await txn.update({ savings_account_id: target.id }, queryOptions);
+      linked += 1;
+    }
+  }
+
+  return { linked };
+}
+
+/**
+ * Reassign opening deposits that name this account but are linked to another savings row.
+ */
+async function reassignMislinkedOpeningTransactions(db, account, options = {}) {
   const queryOptions = options.transaction ? { transaction: options.transaction } : {};
   const accountNumber = account.account_number;
-  const accountCreated = account.createdAt ? new Date(account.createdAt) : null;
-  const windowStart = accountCreated
-    ? new Date(accountCreated.getTime() - 7 * 24 * 60 * 60 * 1000)
-    : null;
-  const windowEnd = accountCreated
-    ? new Date(accountCreated.getTime() + 30 * 24 * 60 * 60 * 1000)
-    : null;
+  const mislinked = await db.Transaction.findAll({
+    where: {
+      client_id: account.client_id,
+      type: 'deposit',
+      [Op.and]: [
+        { savings_account_id: { [Op.ne]: null } },
+        { savings_account_id: { [Op.ne]: account.id } }
+      ],
+      description: textLike(db.sequelize, `%${accountNumber}%`)
+    },
+    ...queryOptions
+  });
+
+  let moved = 0;
+  for (const txn of mislinked) {
+    if (!openingDescriptionMatchesAccount(txn.description, accountNumber)) continue;
+    if (normalizeCurrency(txn.currency) !== normalizeCurrency(account.currency)) continue;
+    await txn.update({ savings_account_id: account.id }, queryOptions);
+    moved += 1;
+  }
+  return moved;
+}
+
+/**
+ * Restore soft-deleted deposit/withdrawal rows for this account (incl. opening).
+ */
+async function restoreSoftDeletedSavingsTransactions(db, account, options = {}) {
+  const queryOptions = options.transaction ? { transaction: options.transaction } : {};
+  const accountNumber = account.account_number;
+  const deleted = await db.Transaction.findAll({
+    where: {
+      client_id: account.client_id,
+      type: { [Op.in]: BALANCE_TX_TYPES },
+      deletedAt: { [Op.ne]: null },
+      [Op.or]: [
+        { savings_account_id: account.id },
+        {
+          savings_account_id: null,
+          currency: normalizeCurrency(account.currency),
+          [Op.or]: [
+            { description: textLike(db.sequelize, `%${accountNumber}%`) },
+            { description: textLike(db.sequelize, '%initial deposit%') },
+            { purpose: INITIAL_OPENING_PURPOSE }
+          ]
+        }
+      ]
+    },
+    paranoid: false,
+    ...queryOptions
+  });
+
+  let restored = 0;
+  for (const txn of deleted) {
+    if (txn.savings_account_id && txn.savings_account_id !== account.id) continue;
+    if (!txn.savings_account_id && !transactionMatchesAccount(txn, account)) continue;
+    if (normalizeCurrency(txn.currency) !== normalizeCurrency(account.currency)) continue;
+    await txn.restore(queryOptions);
+    if (!txn.savings_account_id) {
+      await txn.update({ savings_account_id: account.id }, queryOptions);
+    }
+    restored += 1;
+  }
+  return restored;
+}
+
+async function fetchAttributedTransactions(db, account, options = {}) {
+  const queryOptions = options.transaction ? { transaction: options.transaction } : {};
+  const currency = normalizeCurrency(account.currency);
 
   const linked = await db.Transaction.findAll({
     where: {
       savings_account_id: account.id,
-      type: 'deposit',
-      [Op.or]: [
-        { purpose: INITIAL_OPENING_PURPOSE },
-        { purpose: textLike(db.sequelize, '%initial%opening%') },
-        { purpose: textLike(db.sequelize, '%initial%deposit%') },
-        { description: textLike(db.sequelize, 'Initial deposit for %') },
-        { description: textLike(db.sequelize, '%initial deposit%') }
-      ]
+      type: { [Op.in]: BALANCE_TX_TYPES }
     },
-    attributes: ['id', 'amount', 'status', 'purpose', 'description', 'savings_account_id', 'createdAt'],
+    attributes: ['id', 'type', 'amount', 'status', 'purpose', 'description', 'transaction_date', 'createdAt'],
+    order: [
+      ['transaction_date', 'ASC'],
+      ['createdAt', 'ASC']
+    ],
     ...queryOptions
   });
 
-  const orphanWhere = {
-    client_id: account.client_id,
-    type: 'deposit',
-    savings_account_id: null,
-    [Op.or]: [
-      { purpose: INITIAL_OPENING_PURPOSE },
-      { purpose: textLike(db.sequelize, '%initial%opening%') },
-      { purpose: textLike(db.sequelize, '%initial%deposit%') },
-      { description: textLike(db.sequelize, 'Initial deposit for %') },
-      { description: textLike(db.sequelize, `%${accountNumber}%`) }
-    ]
-  };
-
-  if (windowStart && windowEnd) {
-    orphanWhere.createdAt = { [Op.between]: [windowStart, windowEnd] };
-  }
-
-  const orphans = await db.Transaction.findAll({
-    where: orphanWhere,
-    attributes: ['id', 'amount', 'status', 'purpose', 'description', 'savings_account_id', 'createdAt'],
+  const orphanCandidates = await db.Transaction.findAll({
+    where: {
+      client_id: account.client_id,
+      savings_account_id: null,
+      type: { [Op.in]: BALANCE_TX_TYPES },
+      currency
+    },
+    attributes: ['id', 'type', 'amount', 'status', 'purpose', 'description', 'transaction_date', 'createdAt', 'savings_account_id'],
     ...queryOptions
   });
 
+  const orphansForAccount = orphanCandidates.filter((t) => transactionMatchesAccount(t, account));
   const byId = new Map();
-  for (const txn of [...linked, ...orphans]) {
-    if (isInitialOpeningDeposit(txn) || openingDescriptionMatchesAccount(txn.description, accountNumber)) {
-      byId.set(txn.id, txn);
-    }
+  for (const t of [...linked, ...orphansForAccount]) {
+    byId.set(t.id, t);
   }
-
-  let openingTxns = [...byId.values()];
-
-  if (openingTxns.length === 0) {
-    const firstDeposit = await db.Transaction.findOne({
-      where: {
-        type: 'deposit',
-        status: 'completed',
-        [Op.or]: [
-          { savings_account_id: account.id },
-          {
-            client_id: account.client_id,
-            savings_account_id: null,
-            ...(windowStart && windowEnd
-              ? { createdAt: { [Op.between]: [windowStart, windowEnd] } }
-              : {})
-          }
-        ]
-      },
-      order: [
-        ['transaction_date', 'ASC'],
-        ['createdAt', 'ASC']
-      ],
-      attributes: ['id', 'amount', 'status', 'purpose', 'description', 'savings_account_id', 'createdAt'],
-      ...queryOptions
-    });
-    if (firstDeposit) {
-      openingTxns = [firstDeposit];
-    }
-  }
-
-  return openingTxns;
+  return [...byId.values()];
 }
 
-async function sumCompletedNet(db, savingsAccountId, options = {}) {
-  const queryOptions = options.transaction ? { transaction: options.transaction } : {};
-  const completedTxns = await db.Transaction.findAll({
-    where: {
-      savings_account_id: savingsAccountId,
-      type: { [Op.in]: BALANCE_TX_TYPES },
-      status: 'completed'
-    },
-    attributes: ['type', 'amount'],
-    ...queryOptions
-  });
-
+function sumFromTransactions(transactions, { includePendingOpening = true } = {}) {
   let net = 0;
-  for (const txn of completedTxns) {
+  let openingCompleted = 0;
+  let openingPending = 0;
+
+  for (const txn of transactions) {
     const amt = parseFloat(txn.amount || 0);
-    if (txn.type === 'deposit') net += amt;
-    if (txn.type === 'withdrawal') net -= amt;
+    if (!amt) continue;
+    const isOpening = isInitialOpeningDeposit(txn);
+
+    if (txn.status === 'completed') {
+      if (txn.type === 'deposit') net += amt;
+      if (txn.type === 'withdrawal') net -= amt;
+      if (isOpening && txn.type === 'deposit') openingCompleted += amt;
+    } else if (txn.status === 'pending' && includePendingOpening && isOpening && txn.type === 'deposit') {
+      openingPending += amt;
+      net += amt;
+    }
   }
-  return roundMoney(net);
+
+  return {
+    net: roundMoney(Math.max(0, net)),
+    openingCompleted: roundMoney(openingCompleted),
+    openingPending: roundMoney(openingPending)
+  };
 }
 
 /**
- * Restore opening deposits removed by transaction-only reconciliation.
- * Credits initial/opening deposits plus other completed activity when balance is too low.
+ * Infer opening amount when no opening row exists (balance was set at create without txn).
+ * Uses the earliest deposit on this account within 90 days of account open.
+ */
+/**
+ * Legacy accounts: opening was set on account.balance at create with no opening txn.
+ * Only infer when there is a single early completed deposit (opening-only activity).
+ */
+function inferBalanceOnlyOpening(transactions, account) {
+  const accountCreated = account.createdAt ? new Date(account.createdAt) : null;
+  const windowEnd = accountCreated
+    ? new Date(accountCreated.getTime() + 14 * 24 * 60 * 60 * 1000)
+    : null;
+
+  const deposits = transactions
+    .filter((t) => t.type === 'deposit' && t.status === 'completed')
+    .filter((t) => {
+      if (!accountCreated || !windowEnd) return true;
+      const when = new Date(t.transaction_date || t.createdAt);
+      return when >= accountCreated && when <= windowEnd;
+    })
+    .sort((a, b) => {
+      const ta = new Date(a.transaction_date || a.createdAt).getTime();
+      const tb = new Date(b.transaction_date || b.createdAt).getTime();
+      return ta - tb;
+    });
+
+  if (deposits.length !== 1) return 0;
+  const only = deposits[0];
+  if (isInitialOpeningDeposit(only)) return 0;
+  return roundMoney(parseFloat(only.amount || 0));
+}
+
+/**
+ * Compute correct balance: all attributed completed activity + pending opening,
+ * plus opening credit missing from the ledger after bad reconciliation.
+ */
+async function computeRestoredBalanceForAccount(db, account, options = {}) {
+  await restoreSoftDeletedOpeningTransactions(db, account, options);
+  const transactions = await fetchAttributedTransactions(db, account, options);
+  const { net, openingCompleted, openingPending } = sumFromTransactions(transactions);
+
+  const hasOpeningRow = transactions.some((t) => isInitialOpeningDeposit(t));
+  let target = net;
+
+  if (!hasOpeningRow) {
+    const inferredOpening = inferBalanceOnlyOpening(transactions, account);
+    if (inferredOpening > 0 && net < inferredOpening + 0.01) {
+      // Opening lived only on account.balance at create; ledger missed it entirely.
+      target = roundMoney(Math.max(net, inferredOpening));
+    }
+  }
+
+  // Floor: never below total opening amounts recorded (completed + pending).
+  const openingFloor = roundMoney(openingCompleted + openingPending);
+  if (openingFloor > 0) {
+    target = Math.max(target, openingFloor);
+  }
+
+  return {
+    target,
+    transaction_count: transactions.length,
+    opening_completed: openingCompleted,
+    opening_pending: openingPending,
+    has_opening_row: hasOpeningRow,
+    attributed_net: net
+  };
+}
+
+/**
+ * Restore savings balances after transaction-only reconciliation removed opening credits.
  */
 async function restoreInitialDepositsToSavingsBalances(db, options = {}) {
   const queryOptions = options.transaction ? { transaction: options.transaction } : {};
+  const relinkResult = await relinkOrphanSavingsTransactions(db, options);
+
   const accounts = await db.SavingsAccount.findAll({
     attributes: ['id', 'client_id', 'account_number', 'balance', 'currency', 'createdAt'],
+    order: [['id', 'ASC']],
     ...queryOptions
   });
 
   const restored = [];
   let restoredCount = 0;
-  let skippedNoOpening = 0;
+  let unchanged = 0;
+  let noActivity = 0;
 
   for (const account of accounts) {
-    const accountCreated = account.createdAt ? new Date(account.createdAt) : null;
-    const openingTxns = await findOpeningDepositTransactions(db, account, options);
+    const currentBalance = roundMoney(account.balance);
+    const analysis = await computeRestoredBalanceForAccount(db, account, options);
+    const target = analysis.target;
 
-    for (const txn of openingTxns) {
-      if (!txn.savings_account_id) {
-        await txn.update({ savings_account_id: account.id }, queryOptions);
-      }
-    }
-
-    const openingTotal = roundMoney(
-      openingTxns.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0)
-    );
-    if (openingTotal <= 0) {
-      skippedNoOpening += 1;
+    if (analysis.transaction_count === 0 && target <= 0) {
+      noActivity += 1;
       continue;
     }
 
-    const completedOpening = roundMoney(
-      openingTxns
-        .filter((t) => t.status === 'completed')
-        .reduce((sum, t) => sum + parseFloat(t.amount || 0), 0)
-    );
-
-    const completedNet = await sumCompletedNet(db, account.id, options);
-    const currentBalance = roundMoney(account.balance);
-
-    // Opening counted once + all other completed deposit/withdrawal activity
-    const targetBalance = Math.max(0, roundMoney(openingTotal + completedNet - completedOpening));
-
-    // Also fix accounts where balance is below the opening amount alone (reconcile zeroed opening)
-    const minimumWithOpening = Math.max(targetBalance, openingTotal);
-
-    let finalBalance = minimumWithOpening;
-
-    // Link other orphan client deposits from the opening period, then re-check balance
-    if (accountCreated) {
-      const windowStart = new Date(accountCreated.getTime() - 7 * 24 * 60 * 60 * 1000);
-      const windowEnd = new Date(accountCreated.getTime() + 30 * 24 * 60 * 60 * 1000);
-      const orphanDeposits = await db.Transaction.findAll({
-        where: {
-          client_id: account.client_id,
-          type: 'deposit',
-          status: 'completed',
-          savings_account_id: null,
-          createdAt: { [Op.between]: [windowStart, windowEnd] }
-        },
-        attributes: ['id'],
-        ...queryOptions
-      });
-      for (const txn of orphanDeposits) {
-        await txn.update({ savings_account_id: account.id }, queryOptions);
-      }
-      if (orphanDeposits.length > 0) {
-        const netAfterLink = await sumCompletedNet(db, account.id, options);
-        finalBalance = Math.max(finalBalance, netAfterLink);
-      }
-    }
-
-    if (finalBalance > currentBalance + 0.01) {
-      await account.update({ balance: finalBalance }, queryOptions);
+    if (target > currentBalance + 0.01) {
+      await account.update({ balance: target }, queryOptions);
       restoredCount += 1;
       restored.push({
         savings_account_id: account.id,
         account_number: account.account_number,
         currency: account.currency,
         previous_balance: currentBalance,
-        restored_balance: finalBalance,
-        opening_deposit: openingTotal,
-        completed_net: completedNet
+        restored_balance: target,
+        opening_completed: analysis.opening_completed,
+        opening_pending: analysis.opening_pending,
+        attributed_net: analysis.attributed_net
       });
+    } else {
+      unchanged += 1;
     }
   }
 
   return {
     checked: accounts.length,
     restored: restoredCount,
-    skipped_no_opening_txn: skippedNoOpening,
+    unchanged,
+    no_activity: noActivity,
+    orphans_relinked: relinkResult.linked,
     restored_accounts: restored
+  };
+}
+
+/**
+ * Inspect one account (for support / debugging).
+ */
+async function inspectSavingsAccountRestore(db, accountNumber) {
+  const account = await db.SavingsAccount.findOne({
+    where: { account_number: accountNumber },
+    attributes: ['id', 'client_id', 'account_number', 'balance', 'currency', 'createdAt']
+  });
+  if (!account) {
+    return { found: false, account_number: accountNumber };
+  }
+
+  const currentBalance = roundMoney(account.balance);
+  const analysis = await computeRestoredBalanceForAccount(db, account);
+  const transactions = await fetchAttributedTransactions(db, account);
+
+  return {
+    found: true,
+    account_number: account.account_number,
+    savings_account_id: account.id,
+    currency: account.currency,
+    current_balance: currentBalance,
+    computed_target_balance: analysis.target,
+    would_restore: analysis.target > currentBalance + 0.01,
+    analysis,
+    transactions: transactions.map((t) => ({
+      id: t.id,
+      type: t.type,
+      amount: parseFloat(t.amount || 0),
+      status: t.status,
+      purpose: t.purpose,
+      description: t.description,
+      is_opening: isInitialOpeningDeposit(t)
+    }))
   };
 }
 
@@ -273,5 +457,7 @@ module.exports = {
   isInitialOpeningDeposit,
   applySavingsBalanceChange,
   restoreInitialDepositsToSavingsBalances,
-  findOpeningDepositTransactions
+  relinkOrphanSavingsTransactions,
+  computeRestoredBalanceForAccount,
+  inspectSavingsAccountRestore
 };
