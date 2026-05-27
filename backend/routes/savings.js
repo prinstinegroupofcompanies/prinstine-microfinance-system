@@ -3,12 +3,39 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getBorrowerClient } = require('../helpers/borrower');
+const { reconcileSavingsAccountBalance, reconcileAllSavingsBalances, computeExpectedSavingsBalance } = require('../helpers/savingsBalance');
 
 const router = express.Router();
 
 router.use(authenticate);
 
 const APPROVER_ROLES = ['admin', 'head_micro_loan', 'supervisor'];
+
+// Reconcile all savings balances from completed deposit/withdrawal transactions.
+router.post('/reconcile-balances', authorize('admin', 'head_micro_loan', 'supervisor', 'finance'), async (req, res) => {
+  try {
+    const result = await reconcileAllSavingsBalances(db);
+    const MAX_SAMPLE = 100;
+    const sample = (result.mismatches || []).slice(0, MAX_SAMPLE);
+    res.json({
+      success: true,
+      message: `Savings reconciliation completed. Checked: ${result.checked}, corrected: ${result.corrected}.`,
+      data: {
+        checked: result.checked,
+        corrected: result.corrected,
+        mismatches_sample: sample,
+        mismatches_truncated: (result.mismatches || []).length > sample.length
+      }
+    });
+  } catch (error) {
+    console.error('Savings reconciliation error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reconcile savings balances',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
 
 // Get all savings accounts
 router.get('/', async (req, res) => {
@@ -103,11 +130,19 @@ router.get('/:id', async (req, res) => {
       limit: 50
     });
 
+    const ledgerBalance = await computeExpectedSavingsBalance(db, savingsAccount.id);
+    const storedBalance = Math.round((parseFloat(savingsAccount.balance || 0) + Number.EPSILON) * 100) / 100;
+    const balanceMatchesLedger = Math.abs(storedBalance - ledgerBalance) < 0.01;
+
     res.json({
       success: true,
       data: {
         savingsAccount,
-        transactions
+        transactions,
+        ledger: {
+          balance_from_completed_deposits_withdrawals: ledgerBalance,
+          balance_matches_stored: balanceMatchesLedger
+        }
       }
     });
   } catch (error) {
@@ -247,51 +282,52 @@ router.post('/', [
       currency: currency
     });
 
-    // If there's an initial deposit, create a transaction for it
+    // If there's an initial deposit, create a transaction for it.
+    // Keep this strict to avoid balance/transaction mismatches.
     if (initialDeposit > 0) {
-      try {
-        // Generate unique transaction number
-        let transactionNumber;
-        let isUnique = false;
-        let attempts = 0;
-        const maxAttempts = 10;
-        
-        while (!isUnique && attempts < maxAttempts) {
-          const transactionCount = await db.Transaction.count({ paranoid: false });
-          transactionNumber = `TXN${String(transactionCount + 1 + attempts).padStart(8, '0')}`;
-          
-          const existingTransaction = await db.Transaction.findOne({
-            where: { transaction_number: transactionNumber },
-            paranoid: false
-          });
-          
-          if (!existingTransaction) {
-            isUnique = true;
-          } else {
-            attempts++;
-          }
+      // Generate unique transaction number
+      let transactionNumber;
+      let isUnique = false;
+      let attempts = 0;
+      const maxAttempts = 10;
+
+      while (!isUnique && attempts < maxAttempts) {
+        const transactionCount = await db.Transaction.count({ paranoid: false });
+        transactionNumber = `TXN${String(transactionCount + 1 + attempts).padStart(8, '0')}`;
+
+        const existingTransaction = await db.Transaction.findOne({
+          where: { transaction_number: transactionNumber },
+          paranoid: false
+        });
+
+        if (!existingTransaction) {
+          isUnique = true;
+        } else {
+          attempts++;
         }
-        
-        if (isUnique) {
-          await db.Transaction.create({
-            transaction_number: transactionNumber,
-            client_id: savingsAccount.client_id,
-            savings_account_id: savingsAccount.id,
-            type: 'deposit',
-            amount: initialDeposit,
-            currency: currency,
-            description: `Initial deposit for ${accountNumber}`,
-            purpose: 'Initial account opening deposit',
-            transaction_date: savingsAccount.opening_date || new Date(),
-            status: 'completed',
-            branch_id: branchId,
-            created_by: req.userId
-          });
-        }
-      } catch (transactionError) {
-        // Log error but don't fail account creation
-        console.error('Failed to create initial deposit transaction:', transactionError);
       }
+
+      if (!isUnique) {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to generate initial deposit transaction number. Please try again.'
+        });
+      }
+
+      await db.Transaction.create({
+        transaction_number: transactionNumber,
+        client_id: savingsAccount.client_id,
+        savings_account_id: savingsAccount.id,
+        type: 'deposit',
+        amount: initialDeposit,
+        currency: currency,
+        description: `Initial deposit for ${accountNumber}`,
+        purpose: 'Initial account opening deposit',
+        transaction_date: savingsAccount.opening_date || new Date(),
+        status: 'completed',
+        branch_id: branchId,
+        created_by: req.userId
+      });
     }
 
     // Reload savings account with relations
@@ -340,6 +376,43 @@ router.post('/', [
     res.status(500).json({
       success: false,
       message: 'Failed to create savings account',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+    });
+  }
+});
+
+// Reconcile a single savings account (staff)
+router.post('/:id/reconcile', authorize('admin', 'head_micro_loan', 'supervisor', 'finance'), async (req, res) => {
+  try {
+    const account = await db.SavingsAccount.findByPk(req.params.id);
+    if (!account) {
+      return res.status(404).json({ success: false, message: 'Savings account not found' });
+    }
+    const result = await reconcileSavingsAccountBalance(db, account.id);
+    if (!result) {
+      return res.status(404).json({ success: false, message: 'Savings account not found' });
+    }
+    await account.reload({
+      include: [
+        { model: db.Client, as: 'client', required: false },
+        { model: db.Branch, as: 'branch', required: false }
+      ]
+    });
+    return res.json({
+      success: true,
+      message: result.changed
+        ? 'Balance was updated to match completed deposit and withdrawal history.'
+        : 'Balance already matches transaction history.',
+      data: {
+        correction: result,
+        savingsAccount: account
+      }
+    });
+  } catch (error) {
+    console.error('Single savings reconcile error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to reconcile this account',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
@@ -431,6 +504,7 @@ router.post('/:id/deposit', [
 
     if (!isMicroLoanOfficer) {
       await savingsAccount.update({ balance: newBalance });
+      await reconcileSavingsAccountBalance(db, savingsAccount.id);
     }
 
     // Create notification only if client is linked to a user (user_id required by Notification model; type must be info|success|warning|error)
@@ -591,6 +665,7 @@ router.post('/:id/withdraw', [
 
     if (!isMicroLoanOfficer) {
       await savingsAccount.update({ balance: newBalance });
+      await reconcileSavingsAccountBalance(db, savingsAccount.id);
     }
 
     // Create notification only if client is linked to a user
@@ -664,6 +739,10 @@ router.post('/:id/approve', authorize(...APPROVER_ROLES), async (req, res) => {
     await savingsAccount.update({
       status: 'active',
       approved_by: req.userId
+    });
+    await reconcileSavingsAccountBalance(db, savingsAccount.id);
+    await savingsAccount.reload({
+      include: [{ model: db.Client, as: 'client', required: false }]
     });
     res.json({
       success: true,

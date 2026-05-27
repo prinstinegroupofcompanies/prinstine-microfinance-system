@@ -842,7 +842,7 @@ const Loans = () => {
                             >
                               <i className="fas fa-eye"></i>
                             </Link>
-                            {['admin', 'head_micro_loan'].includes(user?.role) && (
+                            {['admin', 'head_micro_loan', 'micro_loan_officer', 'supervisor'].includes(user?.role) && (
                               <button
                                 className="btn btn-sm btn-outline-primary"
                                 onClick={() => handleEdit(loan.id)}

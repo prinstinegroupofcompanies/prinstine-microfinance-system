@@ -6,7 +6,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 const LoanApplications = () => {
   const { user } = useAuth();
-  const canEditOrDeleteLoanApplication = ['admin', 'head_micro_loan'].includes(user?.role);
+  const canEditOrDeleteLoanApplication = ['admin', 'head_micro_loan', 'micro_loan_officer', 'supervisor'].includes(user?.role);
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
 

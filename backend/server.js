@@ -456,6 +456,26 @@ db.sequelize.authenticate()
     
     return Promise.resolve();
   })
+  .then(async () => {
+    if (process.env.SKIP_SAVINGS_RECONCILE_ON_START === 'true') {
+      console.log('⏭️  Skipping savings reconciliation on start (SKIP_SAVINGS_RECONCILE_ON_START=true).');
+      return;
+    }
+    try {
+      const { bulkReconcileAllSavingsBalances } = require('./helpers/savingsBalance');
+      const result = await bulkReconcileAllSavingsBalances(db);
+      console.log(`✅ Startup savings reconciliation: checked ${result.checked}, corrected ${result.corrected}.`);
+      if (result.corrected > 0) {
+        const preview = (result.mismatches || [])
+          .slice(0, 10)
+          .map((m) => `${m.account_number}: ${m.previous_balance} → ${m.expected_balance}`)
+          .join('; ');
+        console.log(`   Corrections sample: ${preview}${result.corrected > 10 ? ' …' : ''}`);
+      }
+    } catch (reconcileErr) {
+      console.error('⚠️  Startup savings reconciliation failed (non-fatal):', reconcileErr.message);
+    }
+  })
   .then(() => {
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);

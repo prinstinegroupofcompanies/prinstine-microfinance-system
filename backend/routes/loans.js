@@ -1357,8 +1357,8 @@ router.post('/:id/repay', authenticate, [
   }
 });
 
-// Update loan – admin, micro_loan_officer, or head_micro_loan can edit/update all loans and loan requests
-router.put('/:id', authenticate, authorize('admin', 'micro_loan_officer', 'head_micro_loan'), async (req, res) => {
+// Update loan – microfinance leadership/team can edit pending requests and active loans
+router.put('/:id', authenticate, authorize('admin', 'micro_loan_officer', 'head_micro_loan', 'supervisor'), async (req, res) => {
   try {
     const loan = await db.Loan.findByPk(req.params.id);
     if (!loan) {

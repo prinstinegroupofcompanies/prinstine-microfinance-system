@@ -6,14 +6,17 @@ import { useAuth } from '../contexts/AuthContext';
 import moment from 'moment';
 import Receipt from '../components/Receipt';
 import { APPROVER_ROLES } from '../utils/permissions';
+import { formatCurrency } from '../utils/exportUtils';
 
 const SavingsDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const canApproveTransaction = APPROVER_ROLES.includes(user?.role);
+  const canReconcileAccount = ['admin', 'head_micro_loan', 'supervisor', 'finance'].includes(user?.role);
   const [savingsAccount, setSavingsAccount] = useState(null);
   const [transactions, setTransactions] = useState([]);
+  const [ledgerMeta, setLedgerMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
@@ -28,6 +31,8 @@ const SavingsDetail = () => {
     description: '',
     purpose: ''
   });
+
+  const [reconcileOneLoading, setReconcileOneLoading] = useState(false);
 
   useEffect(() => {
     fetchSavingsAccount();
@@ -44,6 +49,7 @@ const SavingsDetail = () => {
       const response = await apiClient.get(`/api/savings/${id}`);
       setSavingsAccount(response.data.data.savingsAccount);
       setTransactions(response.data.data.transactions || []);
+      setLedgerMeta(response.data.data.ledger || null);
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch savings account:', error);
@@ -98,6 +104,20 @@ const SavingsDetail = () => {
     }
   };
 
+  const handleReconcileThisAccount = async () => {
+    if (!window.confirm('Recalculate this account balance from completed deposits and withdrawals only?')) return;
+    setReconcileOneLoading(true);
+    try {
+      const response = await apiClient.post(`/api/savings/${id}/reconcile`);
+      toast.success(response?.data?.message || 'Account reconciled');
+      await fetchSavingsAccount();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to reconcile account');
+    } finally {
+      setReconcileOneLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="text-center py-5">
@@ -117,8 +137,38 @@ const SavingsDetail = () => {
     );
   }
 
+  const acctCurrency = savingsAccount.currency || 'USD';
+  const completedDepositSumShown = transactions
+    .filter((t) => t.type === 'deposit' && t.status === 'completed')
+    .reduce((sum, t) => sum + parseFloat(t.amount || 0), 0);
+  const completedWithdrawSumShown = transactions
+    .filter((t) => t.type === 'withdrawal' && t.status === 'completed')
+    .reduce((sum, t) => sum + parseFloat(t.amount || 0), 0);
+  const ledgerMismatch = ledgerMeta && ledgerMeta.balance_matches_stored === false;
+
   return (
     <div className="fade-in">
+      {ledgerMismatch && (
+        <div className="alert alert-warning d-flex flex-wrap justify-content-between align-items-center" role="alert">
+          <span>
+            Stored balance does not match completed deposit/withdrawal history. Ledger balance:{' '}
+            <strong>
+              {formatCurrency(ledgerMeta.balance_from_completed_deposits_withdrawals || 0, acctCurrency)}
+            </strong>
+            . Use Reconcile to align this account.
+          </span>
+          {canReconcileAccount && (
+            <button
+              type="button"
+              className="btn btn-sm btn-dark mt-2 mt-md-0"
+              onClick={handleReconcileThisAccount}
+              disabled={reconcileOneLoading}
+            >
+              {reconcileOneLoading ? 'Working…' : 'Reconcile this account'}
+            </button>
+          )}
+        </div>
+      )}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <Link to="/savings" className="btn btn-outline-secondary btn-sm mb-2">
@@ -132,6 +182,17 @@ const SavingsDetail = () => {
           </p>
         </div>
         <div>
+          {canReconcileAccount && !ledgerMismatch && (
+            <button
+              type="button"
+              className="btn btn-outline-secondary me-2"
+              onClick={handleReconcileThisAccount}
+              disabled={reconcileOneLoading}
+              title="Ensure balance matches completed deposits and withdrawals"
+            >
+              {reconcileOneLoading ? '…' : <><i className="fas fa-balance-scale me-1" />Reconcile</>}
+            </button>
+          )}
           {savingsAccount.status === 'active' && (
             <>
               <button
@@ -216,24 +277,32 @@ const SavingsDetail = () => {
             <div className="card-body text-center">
               <div className="mb-4">
                 <h2 className="text-primary mb-0">
-                  ${parseFloat(savingsAccount.balance || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {formatCurrency(parseFloat(savingsAccount.balance || 0), acctCurrency)}
                 </h2>
-                <p className="text-muted mb-0">Current Balance</p>
+                <p className="text-muted mb-0">Current balance (stored)</p>
+                {ledgerMeta != null && (
+                  <p className="small text-muted mb-0 mt-2">
+                    Ledger (all completed deposits − withdrawals):{' '}
+                    <strong>
+                      {formatCurrency(ledgerMeta.balance_from_completed_deposits_withdrawals || 0, acctCurrency)}
+                    </strong>
+                  </p>
+                )}
               </div>
               <div className="row">
                 <div className="col-6">
                   <div className="border-end">
                     <h5 className="text-success">
-                      ${transactions.filter(t => t.type === 'deposit').reduce((sum, t) => sum + parseFloat(t.amount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatCurrency(completedDepositSumShown, acctCurrency)}
                     </h5>
-                    <small className="text-muted">Total Deposits</small>
+                    <small className="text-muted">Completed deposits (last 50 rows shown)</small>
                   </div>
                 </div>
                 <div className="col-6">
                   <h5 className="text-danger">
-                    ${transactions.filter(t => t.type === 'withdrawal').reduce((sum, t) => sum + parseFloat(t.amount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    {formatCurrency(completedWithdrawSumShown, acctCurrency)}
                   </h5>
-                  <small className="text-muted">Total Withdrawals</small>
+                  <small className="text-muted">Completed withdrawals (last 50 rows shown)</small>
                 </div>
               </div>
             </div>
@@ -273,7 +342,8 @@ const SavingsDetail = () => {
                           </td>
                           <td>
                             <strong className={transaction.type === 'deposit' ? 'text-success' : 'text-danger'}>
-                              {transaction.type === 'deposit' ? '+' : '-'}${parseFloat(transaction.amount).toLocaleString()}
+                              {transaction.type === 'deposit' ? '+' : '-'}
+                              {formatCurrency(parseFloat(transaction.amount || 0), transaction.currency || acctCurrency)}
                             </strong>
                           </td>
                           <td>{transaction.description || '-'}</td>
@@ -347,7 +417,9 @@ const SavingsDetail = () => {
                     <div className="mb-3">
                       <label className="form-label">Current Balance</label>
                       <div className="form-control-plaintext">
-                        <strong className="text-primary">${parseFloat(savingsAccount.balance || 0).toLocaleString()}</strong>
+                        <strong className="text-primary">
+                          {formatCurrency(parseFloat(savingsAccount.balance || 0), acctCurrency)}
+                        </strong>
                       </div>
                     </div>
                     <div className="mb-3">
@@ -386,7 +458,11 @@ const SavingsDetail = () => {
                     </div>
                     {depositData.amount && (
                       <div className="alert alert-info">
-                        <strong>New Balance:</strong> ${(parseFloat(savingsAccount.balance || 0) + parseFloat(depositData.amount || 0)).toFixed(2)}
+                        <strong>New Balance:</strong>{' '}
+                        {formatCurrency(
+                          parseFloat(savingsAccount.balance || 0) + parseFloat(depositData.amount || 0),
+                          acctCurrency
+                        )}
                       </div>
                     )}
                   </div>
@@ -421,7 +497,9 @@ const SavingsDetail = () => {
                     <div className="mb-3">
                       <label className="form-label">Current Balance</label>
                       <div className="form-control-plaintext">
-                        <strong className="text-primary">${parseFloat(savingsAccount.balance || 0).toLocaleString()}</strong>
+                        <strong className="text-primary">
+                          {formatCurrency(parseFloat(savingsAccount.balance || 0), acctCurrency)}
+                        </strong>
                       </div>
                     </div>
                     <div className="mb-3">
@@ -461,7 +539,14 @@ const SavingsDetail = () => {
                     </div>
                     {withdrawData.amount && (
                       <div className="alert alert-info">
-                        <strong>New Balance:</strong> ${Math.max(0, parseFloat(savingsAccount.balance || 0) - parseFloat(withdrawData.amount || 0)).toFixed(2)}
+                        <strong>New Balance:</strong>{' '}
+                        {formatCurrency(
+                          Math.max(
+                            0,
+                            parseFloat(savingsAccount.balance || 0) - parseFloat(withdrawData.amount || 0)
+                          ),
+                          acctCurrency
+                        )}
                       </div>
                     )}
                   </div>
