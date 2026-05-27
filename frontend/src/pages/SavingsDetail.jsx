@@ -54,7 +54,6 @@ const SavingsDetail = () => {
       const response = await apiClient.get(`/api/savings/${id}`);
       setSavingsAccount(response.data.data.savingsAccount);
       setTransactions(response.data.data.transactions || []);
-      setLedgerMeta(response.data.data.ledger || null);
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch savings account:', error);

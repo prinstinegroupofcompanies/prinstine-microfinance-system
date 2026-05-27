@@ -11,3 +11,5 @@ Manual restore (from project root):
 ```bash
 node backend/scripts/restore-savings-initial-deposits.js
 ```
+
+Or call `POST /api/savings/restore-initial-deposits` as admin, head micro loan, head micro finance, or finance (after deploying the updated restore logic).

@@ -464,7 +464,9 @@ db.sequelize.authenticate()
     try {
       const { restoreInitialDepositsToSavingsBalances } = require('./helpers/savingsBalance');
       const result = await restoreInitialDepositsToSavingsBalances(db);
-      console.log(`✅ Savings initial-deposit restore: checked ${result.checked}, restored ${result.restored}.`);
+      console.log(
+        `✅ Savings initial-deposit restore: checked ${result.checked}, restored ${result.restored}, skipped (no opening txn) ${result.skipped_no_opening_txn ?? 0}.`
+      );
       if (result.restored > 0) {
         const preview = (result.restored_accounts || [])
           .slice(0, 10)

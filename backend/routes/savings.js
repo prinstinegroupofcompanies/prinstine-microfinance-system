@@ -3,13 +3,46 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getBorrowerClient } = require('../helpers/borrower');
-const { INITIAL_OPENING_PURPOSE } = require('../helpers/savingsBalance');
+const {
+  INITIAL_OPENING_PURPOSE,
+  restoreInitialDepositsToSavingsBalances
+} = require('../helpers/savingsBalance');
 
 const router = express.Router();
 
 router.use(authenticate);
 
 const APPROVER_ROLES = ['admin', 'head_micro_loan', 'supervisor'];
+
+// One-time / manual restore of initial opening deposits (after bad reconciliation).
+router.post(
+  '/restore-initial-deposits',
+  authorize('admin', 'head_micro_loan', 'head_micro_finance', 'finance'),
+  async (req, res) => {
+    try {
+      const result = await restoreInitialDepositsToSavingsBalances(db);
+      const sample = (result.restored_accounts || []).slice(0, 50);
+      return res.json({
+        success: true,
+        message: `Restore finished. ${result.restored} of ${result.checked} account(s) updated.`,
+        data: {
+          checked: result.checked,
+          restored: result.restored,
+          skipped_no_opening_txn: result.skipped_no_opening_txn,
+          restored_accounts_sample: sample,
+          sample_truncated: (result.restored_accounts || []).length > sample.length
+        }
+      });
+    } catch (error) {
+      console.error('Restore initial deposits error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to restore initial deposits',
+        error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
+      });
+    }
+  }
+);
 
 // Get all savings accounts
 router.get('/', async (req, res) => {
