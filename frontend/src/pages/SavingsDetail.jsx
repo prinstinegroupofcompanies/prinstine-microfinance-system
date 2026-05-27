@@ -33,6 +33,8 @@ const SavingsDetail = () => {
   });
 
   const [reconcileOneLoading, setReconcileOneLoading] = useState(false);
+  const savingsId = Number(id);
+  const hasValidSavingsId = Number.isInteger(savingsId) && savingsId > 0;
 
   useEffect(() => {
     fetchSavingsAccount();
@@ -45,6 +47,12 @@ const SavingsDetail = () => {
   }, [id]);
 
   const fetchSavingsAccount = async () => {
+    if (!hasValidSavingsId) {
+      toast.error('Invalid savings account ID in URL');
+      setLoading(false);
+      return;
+    }
+
     try {
       const response = await apiClient.get(`/api/savings/${id}`);
       setSavingsAccount(response.data.data.savingsAccount);
@@ -105,6 +113,11 @@ const SavingsDetail = () => {
   };
 
   const handleReconcileThisAccount = async () => {
+    if (!hasValidSavingsId) {
+      toast.error('Invalid savings account ID in URL');
+      return;
+    }
+
     if (!window.confirm('Recalculate this account balance from completed deposits and withdrawals only?')) return;
     setReconcileOneLoading(true);
     try {
@@ -112,7 +125,11 @@ const SavingsDetail = () => {
       toast.success(response?.data?.message || 'Account reconciled');
       await fetchSavingsAccount();
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to reconcile account');
+      if (err.response?.status === 404) {
+        toast.error(err.response?.data?.message || 'Reconcile endpoint not found on server (404). Please deploy latest backend.');
+      } else {
+        toast.error(err.response?.data?.message || 'Failed to reconcile account');
+      }
     } finally {
       setReconcileOneLoading(false);
     }

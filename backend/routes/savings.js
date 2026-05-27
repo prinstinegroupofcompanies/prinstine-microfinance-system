@@ -10,6 +10,12 @@ const router = express.Router();
 router.use(authenticate);
 
 const APPROVER_ROLES = ['admin', 'head_micro_loan', 'supervisor'];
+const RECONCILE_DIAGNOSTIC_ROLES = [
+  'admin',
+  'head_micro_loan',
+  'micro_loan_officer',
+  'head_micro_finance'
+];
 
 // Reconcile all savings balances from completed deposit/withdrawal transactions.
 router.post('/reconcile-balances', authorize('admin', 'head_micro_loan', 'supervisor', 'finance'), async (req, res) => {
@@ -35,6 +41,23 @@ router.post('/reconcile-balances', authorize('admin', 'head_micro_loan', 'superv
       error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
     });
   }
+});
+
+// Check whether reconcile routes are available in this deployed backend.
+router.get('/reconcile-diagnostic', authorize(...RECONCILE_DIAGNOSTIC_ROLES), async (req, res) => {
+  return res.json({
+    success: true,
+    message: 'Savings reconcile routes are available on this server.',
+    data: {
+      role: req.user?.role || null,
+      server_time: new Date().toISOString(),
+      routes: [
+        { method: 'POST', path: '/api/savings/reconcile-balances' },
+        { method: 'POST', path: '/api/savings/:id/reconcile' }
+      ],
+      note: 'If this endpoint works but reconcile actions still fail, verify the savings account ID exists and user role has reconcile permission.'
+    }
+  });
 });
 
 // Get all savings accounts
