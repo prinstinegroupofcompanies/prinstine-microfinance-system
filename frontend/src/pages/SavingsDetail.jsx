@@ -13,10 +13,8 @@ const SavingsDetail = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const canApproveTransaction = APPROVER_ROLES.includes(user?.role);
-  const canReconcileAccount = ['admin', 'head_micro_loan', 'supervisor', 'finance'].includes(user?.role);
   const [savingsAccount, setSavingsAccount] = useState(null);
   const [transactions, setTransactions] = useState([]);
-  const [ledgerMeta, setLedgerMeta] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showDepositModal, setShowDepositModal] = useState(false);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
@@ -32,7 +30,6 @@ const SavingsDetail = () => {
     purpose: ''
   });
 
-  const [reconcileOneLoading, setReconcileOneLoading] = useState(false);
   const savingsId = Number(id);
   const hasValidSavingsId = Number.isInteger(savingsId) && savingsId > 0;
 
@@ -112,34 +109,6 @@ const SavingsDetail = () => {
     }
   };
 
-  const handleReconcileThisAccount = async () => {
-    if (!hasValidSavingsId) {
-      toast.error('Invalid savings account ID in URL');
-      return;
-    }
-
-    if (
-      !window.confirm(
-        'Recalculate this balance from all completed deposits and withdrawals, plus any pending initial opening deposit if applicable?'
-      )
-    )
-      return;
-    setReconcileOneLoading(true);
-    try {
-      const response = await apiClient.post(`/api/savings/${id}/reconcile`);
-      toast.success(response?.data?.message || 'Account reconciled');
-      await fetchSavingsAccount();
-    } catch (err) {
-      if (err.response?.status === 404) {
-        toast.error(err.response?.data?.message || 'Reconcile endpoint not found on server (404). Please deploy latest backend.');
-      } else {
-        toast.error(err.response?.data?.message || 'Failed to reconcile account');
-      }
-    } finally {
-      setReconcileOneLoading(false);
-    }
-  };
-
   if (loading) {
     return (
       <div className="text-center py-5">
@@ -166,31 +135,8 @@ const SavingsDetail = () => {
   const completedWithdrawSumShown = transactions
     .filter((t) => t.type === 'withdrawal' && t.status === 'completed')
     .reduce((sum, t) => sum + parseFloat(t.amount || 0), 0);
-  const ledgerMismatch = ledgerMeta && ledgerMeta.balance_matches_stored === false;
-
   return (
     <div className="fade-in">
-      {ledgerMismatch && (
-        <div className="alert alert-warning d-flex flex-wrap justify-content-between align-items-center" role="alert">
-          <span>
-            Stored balance does not match the savings ledger (completed deposits/withdrawals plus any pending opening deposit). Ledger balance:{' '}
-            <strong>
-              {formatCurrency(ledgerMeta.balance_from_completed_deposits_withdrawals || 0, acctCurrency)}
-            </strong>
-            . Use Reconcile to align this account.
-          </span>
-          {canReconcileAccount && (
-            <button
-              type="button"
-              className="btn btn-sm btn-dark mt-2 mt-md-0"
-              onClick={handleReconcileThisAccount}
-              disabled={reconcileOneLoading}
-            >
-              {reconcileOneLoading ? 'Working…' : 'Reconcile this account'}
-            </button>
-          )}
-        </div>
-      )}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <Link to="/savings" className="btn btn-outline-secondary btn-sm mb-2">
@@ -204,17 +150,6 @@ const SavingsDetail = () => {
           </p>
         </div>
         <div>
-          {canReconcileAccount && !ledgerMismatch && (
-            <button
-              type="button"
-              className="btn btn-outline-secondary me-2"
-              onClick={handleReconcileThisAccount}
-              disabled={reconcileOneLoading}
-              title="Ensure balance matches completed deposits and withdrawals"
-            >
-              {reconcileOneLoading ? '…' : <><i className="fas fa-balance-scale me-1" />Reconcile</>}
-            </button>
-          )}
           {savingsAccount.status === 'active' && (
             <>
               <button
@@ -301,15 +236,7 @@ const SavingsDetail = () => {
                 <h2 className="text-primary mb-0">
                   {formatCurrency(parseFloat(savingsAccount.balance || 0), acctCurrency)}
                 </h2>
-                <p className="text-muted mb-0">Current balance (stored)</p>
-                {ledgerMeta != null && (
-                  <p className="small text-muted mb-0 mt-2">
-                    Ledger (completed deposits − withdrawals; pending opening deposit if applicable):{' '}
-                    <strong>
-                      {formatCurrency(ledgerMeta.balance_from_completed_deposits_withdrawals || 0, acctCurrency)}
-                    </strong>
-                  </p>
-                )}
+                <p className="text-muted mb-0">Current balance</p>
               </div>
               <div className="row">
                 <div className="col-6">

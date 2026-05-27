@@ -3,67 +3,13 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getBorrowerClient } = require('../helpers/borrower');
-const {
-  reconcileSavingsAccountBalance,
-  reconcileAllSavingsBalances,
-  computeExpectedSavingsBalance,
-  INITIAL_OPENING_PURPOSE
-} = require('../helpers/savingsBalance');
+const { INITIAL_OPENING_PURPOSE } = require('../helpers/savingsBalance');
 
 const router = express.Router();
 
 router.use(authenticate);
 
 const APPROVER_ROLES = ['admin', 'head_micro_loan', 'supervisor'];
-const RECONCILE_DIAGNOSTIC_ROLES = [
-  'admin',
-  'head_micro_loan',
-  'micro_loan_officer',
-  'head_micro_finance'
-];
-
-// Reconcile all savings balances from completed deposit/withdrawal transactions.
-router.post('/reconcile-balances', authorize('admin', 'head_micro_loan', 'supervisor', 'finance'), async (req, res) => {
-  try {
-    const result = await reconcileAllSavingsBalances(db);
-    const MAX_SAMPLE = 100;
-    const sample = (result.mismatches || []).slice(0, MAX_SAMPLE);
-    res.json({
-      success: true,
-      message: `Savings reconciliation completed. Checked: ${result.checked}, corrected: ${result.corrected}.`,
-      data: {
-        checked: result.checked,
-        corrected: result.corrected,
-        mismatches_sample: sample,
-        mismatches_truncated: (result.mismatches || []).length > sample.length
-      }
-    });
-  } catch (error) {
-    console.error('Savings reconciliation error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to reconcile savings balances',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
-// Check whether reconcile routes are available in this deployed backend.
-router.get('/reconcile-diagnostic', authorize(...RECONCILE_DIAGNOSTIC_ROLES), async (req, res) => {
-  return res.json({
-    success: true,
-    message: 'Savings reconcile routes are available on this server.',
-    data: {
-      role: req.user?.role || null,
-      server_time: new Date().toISOString(),
-      routes: [
-        { method: 'POST', path: '/api/savings/reconcile-balances' },
-        { method: 'POST', path: '/api/savings/:id/reconcile' }
-      ],
-      note: 'If this endpoint works but reconcile actions still fail, verify the savings account ID exists and user role has reconcile permission.'
-    }
-  });
-});
 
 // Get all savings accounts
 router.get('/', async (req, res) => {
@@ -158,19 +104,11 @@ router.get('/:id', async (req, res) => {
       limit: 50
     });
 
-    const ledgerBalance = await computeExpectedSavingsBalance(db, savingsAccount.id);
-    const storedBalance = Math.round((parseFloat(savingsAccount.balance || 0) + Number.EPSILON) * 100) / 100;
-    const balanceMatchesLedger = Math.abs(storedBalance - ledgerBalance) < 0.01;
-
     res.json({
       success: true,
       data: {
         savingsAccount,
-        transactions,
-        ledger: {
-          balance_from_completed_deposits_withdrawals: ledgerBalance,
-          balance_matches_stored: balanceMatchesLedger
-        }
+        transactions
       }
     });
   } catch (error) {
@@ -409,43 +347,6 @@ router.post('/', [
   }
 });
 
-// Reconcile a single savings account (staff)
-router.post('/:id/reconcile', authorize('admin', 'head_micro_loan', 'supervisor', 'finance'), async (req, res) => {
-  try {
-    const account = await db.SavingsAccount.findByPk(req.params.id);
-    if (!account) {
-      return res.status(404).json({ success: false, message: 'Savings account not found' });
-    }
-    const result = await reconcileSavingsAccountBalance(db, account.id);
-    if (!result) {
-      return res.status(404).json({ success: false, message: 'Savings account not found' });
-    }
-    await account.reload({
-      include: [
-        { model: db.Client, as: 'client', required: false },
-        { model: db.Branch, as: 'branch', required: false }
-      ]
-    });
-    return res.json({
-      success: true,
-      message: result.changed
-        ? 'Balance was updated to match completed deposit and withdrawal history.'
-        : 'Balance already matches transaction history.',
-      data: {
-        correction: result,
-        savingsAccount: account
-      }
-    });
-  } catch (error) {
-    console.error('Single savings reconcile error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to reconcile this account',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Internal server error'
-    });
-  }
-});
-
 // Deposit to savings account
 router.post('/:id/deposit', [
   body('amount').isFloat({ min: 0.01 }).withMessage('Valid deposit amount is required'),
@@ -532,7 +433,6 @@ router.post('/:id/deposit', [
 
     if (!isMicroLoanOfficer) {
       await savingsAccount.update({ balance: newBalance });
-      await reconcileSavingsAccountBalance(db, savingsAccount.id);
     }
 
     // Create notification only if client is linked to a user (user_id required by Notification model; type must be info|success|warning|error)
@@ -693,7 +593,6 @@ router.post('/:id/withdraw', [
 
     if (!isMicroLoanOfficer) {
       await savingsAccount.update({ balance: newBalance });
-      await reconcileSavingsAccountBalance(db, savingsAccount.id);
     }
 
     // Create notification only if client is linked to a user
@@ -768,7 +667,6 @@ router.post('/:id/approve', authorize(...APPROVER_ROLES), async (req, res) => {
       status: 'active',
       approved_by: req.userId
     });
-    await reconcileSavingsAccountBalance(db, savingsAccount.id);
     await savingsAccount.reload({
       include: [{ model: db.Client, as: 'client', required: false }]
     });

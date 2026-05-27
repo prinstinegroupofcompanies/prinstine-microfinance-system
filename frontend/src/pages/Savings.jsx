@@ -10,8 +10,6 @@ import { APPROVER_ROLES } from '../utils/permissions';
 const Savings = () => {
   const { user } = useAuth();
   const canDeleteSavings = ['admin', 'head_micro_loan'].includes(user?.role);
-  const canReconcileSavings = ['admin', 'head_micro_loan', 'supervisor', 'finance'].includes(user?.role);
-  const [reconcileLoading, setReconcileLoading] = useState(false);
   const [savings, setSavings] = useState([]);
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -265,32 +263,6 @@ const Savings = () => {
     }
   };
 
-  const handleReconcileBalances = async () => {
-    if (
-      !window.confirm(
-        'Recalculate all savings balances from completed deposits and withdrawals only. This fixes accounts that do not match transaction history. Continue?'
-      )
-    ) {
-      return;
-    }
-    setReconcileLoading(true);
-    try {
-      const response = await apiClient.post('/api/savings/reconcile-balances');
-      const d = response?.data?.data;
-      const corrected = d?.corrected ?? 0;
-      const checked = d?.checked ?? 0;
-      toast.success(
-        `Reconciliation done: ${corrected} account(s) corrected out of ${checked} checked.`
-      );
-      await fetchSavings();
-    } catch (error) {
-      console.error('Reconcile balances failed:', error);
-      toast.error(error.response?.data?.message || 'Failed to reconcile savings balances');
-    } finally {
-      setReconcileLoading(false);
-    }
-  };
-
   const handleExportPDF = () => {
     const columns = [
       { key: 'account_number', header: 'Account Number' },
@@ -366,26 +338,6 @@ const Savings = () => {
             <button className="btn btn-primary hover-lift" onClick={() => setShowModal(true)}>
               <i className="fas fa-plus me-2"></i>Add Savings Account
             </button>
-            {canReconcileSavings && (
-              <button
-                type="button"
-                className="btn btn-outline-warning hover-lift"
-                onClick={handleReconcileBalances}
-                disabled={reconcileLoading}
-                title="Recalculate balances from completed deposit/withdrawal history"
-              >
-                {reconcileLoading ? (
-                  <>
-                    <span className="spinner-border spinner-border-sm me-2" role="status" />
-                    Reconciling…
-                  </>
-                ) : (
-                  <>
-                    <i className="fas fa-balance-scale me-2"></i>Reconcile balances
-                  </>
-                )}
-              </button>
-            )}
           </div>
         )}
       </div>

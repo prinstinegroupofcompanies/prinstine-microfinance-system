@@ -457,23 +457,23 @@ db.sequelize.authenticate()
     return Promise.resolve();
   })
   .then(async () => {
-    if (process.env.SKIP_SAVINGS_RECONCILE_ON_START === 'true') {
-      console.log('⏭️  Skipping savings reconciliation on start (SKIP_SAVINGS_RECONCILE_ON_START=true).');
+    if (process.env.SKIP_SAVINGS_INITIAL_DEPOSIT_RESTORE === 'true') {
+      console.log('⏭️  Skipping savings initial-deposit restore on start (SKIP_SAVINGS_INITIAL_DEPOSIT_RESTORE=true).');
       return;
     }
     try {
-      const { bulkReconcileAllSavingsBalances } = require('./helpers/savingsBalance');
-      const result = await bulkReconcileAllSavingsBalances(db);
-      console.log(`✅ Startup savings reconciliation: checked ${result.checked}, corrected ${result.corrected}.`);
-      if (result.corrected > 0) {
-        const preview = (result.mismatches || [])
+      const { restoreInitialDepositsToSavingsBalances } = require('./helpers/savingsBalance');
+      const result = await restoreInitialDepositsToSavingsBalances(db);
+      console.log(`✅ Savings initial-deposit restore: checked ${result.checked}, restored ${result.restored}.`);
+      if (result.restored > 0) {
+        const preview = (result.restored_accounts || [])
           .slice(0, 10)
-          .map((m) => `${m.account_number}: ${m.previous_balance} → ${m.expected_balance}`)
+          .map((m) => `${m.account_number}: ${m.previous_balance} → ${m.restored_balance}`)
           .join('; ');
-        console.log(`   Corrections sample: ${preview}${result.corrected > 10 ? ' …' : ''}`);
+        console.log(`   Restored sample: ${preview}${result.restored > 10 ? ' …' : ''}`);
       }
-    } catch (reconcileErr) {
-      console.error('⚠️  Startup savings reconciliation failed (non-fatal):', reconcileErr.message);
+    } catch (restoreErr) {
+      console.error('⚠️  Savings initial-deposit restore failed (non-fatal):', restoreErr.message);
     }
   })
   .then(() => {

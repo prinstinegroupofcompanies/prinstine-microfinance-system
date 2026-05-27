@@ -1,9 +1,13 @@
 # Prinstine-Microfinance-System
 
-## Savings balance reconciliation
+## Savings balances
 
-After deploy, the backend **automatically** recalculates every savings account balance from **completed** `deposit` and `withdrawal` transactions, plus any **pending initial opening deposit** (opening credit not yet approved) when no completed opening row exists—so the opening amount stays aligned with later client deposits and withdrawals (fixes historical drift).
+Savings account balances are updated when deposits and withdrawals are recorded (including initial opening deposits at account creation). Balances are **not** recalculated from transaction history automatically.
 
-- **Disable** automatic run on server start: set `SKIP_SAVINGS_RECONCILE_ON_START=true` in the backend environment.
-- **Manual run** (also from the Savings page for authorized staff): `POST /api/savings/reconcile-balances` with a valid JWT (`admin`, `head_micro_loan`, `supervisor`, or `finance`).
-- **Single account:** `POST /api/savings/:id/reconcile` (same roles). The account detail screen shows ledger vs stored balance when they differ.
+After deploying an update that removes reconciliation, the server runs a **one-time restore** on startup to credit back initial opening deposits that were removed by the old reconciliation process. To skip that restore: set `SKIP_SAVINGS_INITIAL_DEPOSIT_RESTORE=true` on the backend.
+
+Manual restore (from project root):
+
+```bash
+node backend/scripts/restore-savings-initial-deposits.js
+```

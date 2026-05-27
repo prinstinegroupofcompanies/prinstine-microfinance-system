@@ -1,4 +1,4 @@
-const { Op, QueryTypes } = require('sequelize');
+const { Op } = require('sequelize');
 
 const BALANCE_TX_TYPES = ['deposit', 'withdrawal'];
 
@@ -17,219 +17,135 @@ function isInitialOpeningDeposit(txn) {
 }
 
 /**
- * Expected balance from the ledger:
- * - All completed deposits and withdrawals for this savings account.
- * - Plus any pending *initial opening* deposit (same rules as account creation), because the
- *   account `balance` is set at open while that row may still be pending approval in some flows.
- * Other pending deposits/withdrawals are excluded (stored balance does not include them until completed).
+ * Apply or reverse a completed deposit/withdrawal on the stored savings balance.
  */
-async function computeExpectedSavingsBalance(db, savingsAccountId, options = {}) {
-  const queryOptions = options.transaction ? { transaction: options.transaction } : {};
-  const transactions = await db.Transaction.findAll({
-    where: {
-      savings_account_id: savingsAccountId,
-      type: { [Op.in]: BALANCE_TX_TYPES },
-      status: { [Op.in]: ['completed', 'pending'] }
-    },
-    attributes: ['type', 'amount', 'status', 'purpose', 'description'],
-    ...queryOptions
-  });
-
-  const hasCompletedInitialOpening = transactions.some(
-    (t) => t.status === 'completed' && isInitialOpeningDeposit(t)
-  );
-
-  let expected = 0;
-  for (const txn of transactions) {
-    const amount = parseFloat(txn.amount || 0);
-
-    if (txn.status === 'completed') {
-      if (txn.type === 'deposit') expected += amount;
-      if (txn.type === 'withdrawal') expected -= amount;
-      continue;
-    }
-
-    // Pending opening initial: included when the opening credit is not yet completed.
-    // Skip if a completed opening row already exists (avoids double-count bad data).
-    if (txn.status === 'pending' && isInitialOpeningDeposit(txn) && !hasCompletedInitialOpening) {
-      expected += amount;
-    }
-  }
-
-  return Math.max(0, roundMoney(expected));
-}
-
-async function reconcileSavingsAccountBalance(db, savingsAccountId, options = {}) {
+async function applySavingsBalanceChange(db, savingsAccountId, type, amount, direction = 'apply', options = {}) {
+  if (!savingsAccountId || !BALANCE_TX_TYPES.includes(type)) return;
   const queryOptions = options.transaction ? { transaction: options.transaction } : {};
   const account = await db.SavingsAccount.findByPk(savingsAccountId, queryOptions);
-  if (!account) return null;
+  if (!account || account.status !== 'active') return;
 
-  const expectedBalance = await computeExpectedSavingsBalance(db, savingsAccountId, options);
-  const currentBalance = roundMoney(account.balance);
-  const changed = Math.abs(currentBalance - expectedBalance) >= 0.01;
+  const amt = parseFloat(amount || 0);
+  if (!amt || amt <= 0) return;
 
-  if (changed) {
-    await account.update({ balance: expectedBalance }, queryOptions);
+  const current = parseFloat(account.balance || 0);
+  const sign = direction === 'reverse' ? -1 : 1;
+  let next = current;
+
+  if (type === 'deposit') {
+    next = current + sign * amt;
+  } else if (type === 'withdrawal') {
+    next = direction === 'reverse' ? current + amt : Math.max(0, current - amt);
   }
 
-  return {
-    savings_account_id: account.id,
-    account_number: account.account_number,
-    currency: account.currency,
-    current_balance: currentBalance,
-    expected_balance: expectedBalance,
-    changed
-  };
+  await account.update({ balance: Math.max(0, roundMoney(next)) }, queryOptions);
 }
 
 /**
- * One-shot bulk reconcile: recomputes every account balance from completed
- * deposits/withdrawals plus any pending initial-opening deposit (when no completed
- * opening row exists). Fast; corrects historical drift.
+ * One-time restore after transaction-only reconciliation removed opening credits.
+ * Sets balance to: opening deposit(s) + other completed deposits − completed withdrawals,
+ * only when that target is higher than the current stored balance.
  */
-async function bulkReconcileAllSavingsBalances(db, options = {}) {
-  const sequelize = db.sequelize;
-  const dialect = sequelize.getDialect();
-  const txn = options.transaction;
-
-  const signedAmountSql =
-    dialect === 'postgres'
-      ? `CASE WHEN type = 'deposit' THEN amount::numeric WHEN type = 'withdrawal' THEN -amount::numeric ELSE 0 END`
-      : `CASE WHEN type = 'deposit' THEN CAST(amount AS REAL) WHEN type = 'withdrawal' THEN -CAST(amount AS REAL) ELSE 0 END`;
-
-  const completionSumSql = `
-    SELECT savings_account_id AS id,
-      COALESCE(SUM(${signedAmountSql}), 0) AS expected_raw
-    FROM transactions
-    WHERE savings_account_id IS NOT NULL
-      AND status = 'completed'
-      AND type IN ('deposit', 'withdrawal')
-      AND deleted_at IS NULL
-    GROUP BY savings_account_id
-  `;
-
-  const pendingOpeningSql =
-    dialect === 'postgres'
-      ? `
-    SELECT t.savings_account_id AS id,
-      COALESCE(SUM(t.amount::numeric), 0) AS pending_initial_raw
-    FROM transactions t
-    WHERE t.savings_account_id IS NOT NULL
-      AND t.deleted_at IS NULL
-      AND t.type = 'deposit'
-      AND t.status = 'pending'
-      AND (
-        t.purpose = :initialPurpose
-        OR t.description LIKE 'Initial deposit for %'
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM transactions o
-        WHERE o.savings_account_id = t.savings_account_id
-          AND o.deleted_at IS NULL
-          AND o.type = 'deposit'
-          AND o.status = 'completed'
-          AND (
-            o.purpose = :initialPurpose
-            OR o.description LIKE 'Initial deposit for %'
-          )
-      )
-    GROUP BY t.savings_account_id
-  `
-      : `
-    SELECT t.savings_account_id AS id,
-      COALESCE(SUM(CAST(t.amount AS REAL)), 0) AS pending_initial_raw
-    FROM transactions t
-    WHERE t.savings_account_id IS NOT NULL
-      AND t.deleted_at IS NULL
-      AND t.type = 'deposit'
-      AND t.status = 'pending'
-      AND (
-        t.purpose = :initialPurpose
-        OR t.description LIKE 'Initial deposit for %'
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM transactions o
-        WHERE o.savings_account_id = t.savings_account_id
-          AND o.deleted_at IS NULL
-          AND o.type = 'deposit'
-          AND o.status = 'completed'
-          AND (
-            o.purpose = :initialPurpose
-            OR o.description LIKE 'Initial deposit for %'
-          )
-      )
-    GROUP BY t.savings_account_id
-  `;
-
-  const sumRows = await sequelize.query(completionSumSql, {
-    type: QueryTypes.SELECT,
-    transaction: txn
-  });
-
-  const pendingOpeningRows = await sequelize.query(pendingOpeningSql, {
-    type: QueryTypes.SELECT,
-    transaction: txn,
-    replacements: { initialPurpose: INITIAL_OPENING_PURPOSE }
-  });
-
-  const expectedById = new Map();
-  for (const row of sumRows) {
-    const id = row.id;
-    if (id == null) continue;
-    expectedById.set(id, Math.max(0, roundMoney(row.expected_raw)));
-  }
-  for (const row of pendingOpeningRows) {
-    const id = row.id;
-    if (id == null) continue;
-    const add = roundMoney(row.pending_initial_raw);
-    const prev = expectedById.get(id) ?? 0;
-    expectedById.set(id, Math.max(0, roundMoney(prev + add)));
-  }
-
+async function restoreInitialDepositsToSavingsBalances(db, options = {}) {
+  const queryOptions = options.transaction ? { transaction: options.transaction } : {};
   const accounts = await db.SavingsAccount.findAll({
-    attributes: ['id', 'account_number', 'currency', 'balance'],
-    transaction: txn
+    attributes: ['id', 'client_id', 'account_number', 'balance', 'currency'],
+    ...queryOptions
   });
 
-  const mismatches = [];
-  const updates = [];
+  const restored = [];
+  let restoredCount = 0;
 
   for (const account of accounts) {
-    const expectedBalance = expectedById.get(account.id) ?? 0;
+    const openingTxns = await db.Transaction.findAll({
+      where: {
+        type: 'deposit',
+        [Op.and]: [
+          {
+            [Op.or]: [
+              { purpose: INITIAL_OPENING_PURPOSE },
+              { description: { [Op.like]: 'Initial deposit for %' } }
+            ]
+          },
+          {
+            [Op.or]: [
+              { savings_account_id: account.id },
+              {
+                client_id: account.client_id,
+                savings_account_id: null,
+                description: { [Op.like]: `Initial deposit for ${account.account_number}%` }
+              }
+            ]
+          }
+        ]
+      },
+      attributes: ['id', 'amount', 'status', 'purpose', 'description', 'savings_account_id'],
+      ...queryOptions
+    });
+
+    for (const txn of openingTxns) {
+      if (!txn.savings_account_id) {
+        await txn.update({ savings_account_id: account.id }, queryOptions);
+      }
+    }
+
+    const openingTotal = roundMoney(
+      openingTxns.reduce((sum, t) => sum + parseFloat(t.amount || 0), 0)
+    );
+    if (openingTotal <= 0) continue;
+
+    const completedOpening = roundMoney(
+      openingTxns
+        .filter((t) => t.status === 'completed')
+        .reduce((sum, t) => sum + parseFloat(t.amount || 0), 0)
+    );
+
+    const completedTxns = await db.Transaction.findAll({
+      where: {
+        savings_account_id: account.id,
+        type: { [Op.in]: BALANCE_TX_TYPES },
+        status: 'completed'
+      },
+      attributes: ['type', 'amount'],
+      ...queryOptions
+    });
+
+    let completedNet = 0;
+    for (const txn of completedTxns) {
+      const amt = parseFloat(txn.amount || 0);
+      if (txn.type === 'deposit') completedNet += amt;
+      if (txn.type === 'withdrawal') completedNet -= amt;
+    }
+    completedNet = roundMoney(completedNet);
+
+    const targetBalance = Math.max(0, roundMoney(openingTotal + completedNet - completedOpening));
     const currentBalance = roundMoney(account.balance);
-    const changed = Math.abs(currentBalance - expectedBalance) >= 0.01;
-    if (changed) {
-      updates.push(account.update({ balance: expectedBalance }, { transaction: txn }));
-      mismatches.push({
+
+    if (targetBalance > currentBalance + 0.01) {
+      await account.update({ balance: targetBalance }, queryOptions);
+      restoredCount += 1;
+      restored.push({
         savings_account_id: account.id,
         account_number: account.account_number,
         currency: account.currency,
         previous_balance: currentBalance,
-        expected_balance: expectedBalance
+        restored_balance: targetBalance,
+        opening_deposit: openingTotal
       });
     }
   }
 
-  await Promise.all(updates);
-
   return {
     checked: accounts.length,
-    corrected: mismatches.length,
-    mismatches
+    restored: restoredCount,
+    restored_accounts: restored
   };
-}
-
-/** @deprecated Prefer bulkReconcileAllSavingsBalances; kept for compatibility */
-async function reconcileAllSavingsBalances(db, options = {}) {
-  return bulkReconcileAllSavingsBalances(db, options);
 }
 
 module.exports = {
   BALANCE_TX_TYPES,
   INITIAL_OPENING_PURPOSE,
   isInitialOpeningDeposit,
-  computeExpectedSavingsBalance,
-  reconcileSavingsAccountBalance,
-  reconcileAllSavingsBalances,
-  bulkReconcileAllSavingsBalances
+  applySavingsBalanceChange,
+  restoreInitialDepositsToSavingsBalances
 };

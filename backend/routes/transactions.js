@@ -5,7 +5,7 @@ const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getBorrowerClient } = require('../helpers/borrower');
 const { createRevenue, REVENUE_SOURCES } = require('../helpers/revenue');
-const { reconcileSavingsAccountBalance, BALANCE_TX_TYPES } = require('../helpers/savingsBalance');
+const { applySavingsBalanceChange, BALANCE_TX_TYPES } = require('../helpers/savingsBalance');
 
 const router = express.Router();
 
@@ -334,7 +334,6 @@ router.post('/', [
             ? currentBalance + amount
             : Math.max(0, currentBalance - amount);
           await savingsAccount.update({ balance: newBalance });
-          await reconcileSavingsAccountBalance(db, savingsAccount.id);
         }
       } catch (savingsErr) {
         console.error('Update savings balance on transaction error:', savingsErr);
@@ -575,7 +574,6 @@ router.post('/:id/approve', authorize(...APPROVER_ROLES), async (req, res) => {
     }
     await savingsAccount.update({ balance: newBalance });
     await transaction.update({ status: 'completed' });
-    await reconcileSavingsAccountBalance(db, savingsAccount.id);
     res.json({
       success: true,
       message: 'Transaction approved successfully',
@@ -614,18 +612,33 @@ router.put('/:id', authorize('admin', 'micro_loan_officer', 'head_micro_loan', '
       });
     }
 
-    const affectedSavingsIds = new Set();
-    if (transaction.savings_account_id && BALANCE_TX_TYPES.includes(transaction.type)) {
-      affectedSavingsIds.add(transaction.savings_account_id);
-    }
+    const priorType = transaction.type;
+    const priorStatus = transaction.status;
+    const priorAmount = parseFloat(transaction.amount || 0);
+    const priorSavingsId = transaction.savings_account_id;
 
     await transaction.update(req.body);
+    await transaction.reload();
 
-    if (transaction.savings_account_id && BALANCE_TX_TYPES.includes(transaction.type)) {
-      affectedSavingsIds.add(transaction.savings_account_id);
+    if (
+      priorSavingsId &&
+      BALANCE_TX_TYPES.includes(priorType) &&
+      priorStatus === 'completed'
+    ) {
+      await applySavingsBalanceChange(db, priorSavingsId, priorType, priorAmount, 'reverse');
     }
-    for (const savingsId of affectedSavingsIds) {
-      await reconcileSavingsAccountBalance(db, savingsId);
+    if (
+      transaction.savings_account_id &&
+      BALANCE_TX_TYPES.includes(transaction.type) &&
+      transaction.status === 'completed'
+    ) {
+      await applySavingsBalanceChange(
+        db,
+        transaction.savings_account_id,
+        transaction.type,
+        transaction.amount,
+        'apply'
+      );
     }
 
     res.json({
@@ -667,7 +680,14 @@ router.delete('/:id', authorize('admin', 'head_micro_loan'), async (req, res) =>
     await transaction.destroy({ transaction: dbTransaction });
 
     if (impactsBalance && impactedSavingsId) {
-      await reconcileSavingsAccountBalance(db, impactedSavingsId, { transaction: dbTransaction });
+      await applySavingsBalanceChange(
+        db,
+        impactedSavingsId,
+        transaction.type,
+        transaction.amount,
+        'reverse',
+        { transaction: dbTransaction }
+      );
     }
 
     await dbTransaction.commit();
