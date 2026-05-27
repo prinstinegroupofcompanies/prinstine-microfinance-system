@@ -118,7 +118,12 @@ const SavingsDetail = () => {
       return;
     }
 
-    if (!window.confirm('Recalculate this account balance from completed deposits and withdrawals only?')) return;
+    if (
+      !window.confirm(
+        'Recalculate this balance from all completed deposits and withdrawals, plus any pending initial opening deposit if applicable?'
+      )
+    )
+      return;
     setReconcileOneLoading(true);
     try {
       const response = await apiClient.post(`/api/savings/${id}/reconcile`);
@@ -168,7 +173,7 @@ const SavingsDetail = () => {
       {ledgerMismatch && (
         <div className="alert alert-warning d-flex flex-wrap justify-content-between align-items-center" role="alert">
           <span>
-            Stored balance does not match completed deposit/withdrawal history. Ledger balance:{' '}
+            Stored balance does not match the savings ledger (completed deposits/withdrawals plus any pending opening deposit). Ledger balance:{' '}
             <strong>
               {formatCurrency(ledgerMeta.balance_from_completed_deposits_withdrawals || 0, acctCurrency)}
             </strong>
@@ -299,7 +304,7 @@ const SavingsDetail = () => {
                 <p className="text-muted mb-0">Current balance (stored)</p>
                 {ledgerMeta != null && (
                   <p className="small text-muted mb-0 mt-2">
-                    Ledger (all completed deposits − withdrawals):{' '}
+                    Ledger (completed deposits − withdrawals; pending opening deposit if applicable):{' '}
                     <strong>
                       {formatCurrency(ledgerMeta.balance_from_completed_deposits_withdrawals || 0, acctCurrency)}
                     </strong>

@@ -2,7 +2,7 @@
 
 ## Savings balance reconciliation
 
-After deploy, the backend **automatically** recalculates every savings account balance from **completed** `deposit` and `withdrawal` transactions only (fixes historical drift).
+After deploy, the backend **automatically** recalculates every savings account balance from **completed** `deposit` and `withdrawal` transactions, plus any **pending initial opening deposit** (opening credit not yet approved) when no completed opening row exists—so the opening amount stays aligned with later client deposits and withdrawals (fixes historical drift).
 
 - **Disable** automatic run on server start: set `SKIP_SAVINGS_RECONCILE_ON_START=true` in the backend environment.
 - **Manual run** (also from the Savings page for authorized staff): `POST /api/savings/reconcile-balances` with a valid JWT (`admin`, `head_micro_loan`, `supervisor`, or `finance`).

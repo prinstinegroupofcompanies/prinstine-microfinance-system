@@ -3,7 +3,12 @@ const { body, validationResult } = require('express-validator');
 const db = require('../config/database');
 const { authenticate, authorize } = require('../middleware/auth');
 const { getBorrowerClient } = require('../helpers/borrower');
-const { reconcileSavingsAccountBalance, reconcileAllSavingsBalances, computeExpectedSavingsBalance } = require('../helpers/savingsBalance');
+const {
+  reconcileSavingsAccountBalance,
+  reconcileAllSavingsBalances,
+  computeExpectedSavingsBalance,
+  INITIAL_OPENING_PURPOSE
+} = require('../helpers/savingsBalance');
 
 const router = express.Router();
 
@@ -345,7 +350,7 @@ router.post('/', [
         amount: initialDeposit,
         currency: currency,
         description: `Initial deposit for ${accountNumber}`,
-        purpose: 'Initial account opening deposit',
+        purpose: INITIAL_OPENING_PURPOSE,
         transaction_date: savingsAccount.opening_date || new Date(),
         status: 'completed',
         branch_id: branchId,
