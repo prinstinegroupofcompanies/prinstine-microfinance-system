@@ -17,17 +17,27 @@ if (!API_URL) {
 
 // If API_URL is just a hostname (from Render service reference), construct full URL
 if (API_URL && !API_URL.startsWith('http://') && !API_URL.startsWith('https://') && API_URL !== '') {
-  // Check if it's a Render service hostname (contains service name pattern)
-  // Render service references return just the hostname like "microfinance-backend-t5nm"
+  // Render service references return just the hostname like "microfinance-backend-5y3w"
   if (API_URL.includes('microfinance-backend') || API_URL.match(/^[a-z0-9-]+$/)) {
-    // Construct full Render URL
     API_URL = `https://${API_URL}.onrender.com`;
   }
 }
 
-console.log('API Client initialized with URL:', API_URL || '(relative - same domain)');
-console.log('VITE_API_URL env var:', import.meta.env.VITE_API_URL);
-console.log('Production mode:', import.meta.env.PROD);
+// Normalize: no trailing slash (avoids double-slash in request paths)
+if (API_URL && API_URL.endsWith('/')) {
+  API_URL = API_URL.slice(0, -1);
+}
+
+if (import.meta.env.PROD && !API_URL) {
+  console.warn(
+    'VITE_API_URL is not set. Set it to your Render backend URL in Vercel environment variables, e.g. https://microfinance-backend-5y3w.onrender.com'
+  );
+}
+
+if (import.meta.env.DEV) {
+  console.log('API Client initialized with URL:', API_URL || 'http://localhost:5000 (default)');
+  console.log('VITE_API_URL env var:', import.meta.env.VITE_API_URL);
+}
 
 // Create axios instance with base URL
 const apiClient = axios.create({

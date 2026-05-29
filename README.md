@@ -1,5 +1,14 @@
 # Prinstine-Microfinance-System
 
+## Deployment
+
+| Service | Platform | URL |
+|---------|----------|-----|
+| Backend API | Render | https://microfinance-backend-5y3w.onrender.com |
+| Frontend | Vercel | See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) |
+
+Quick Vercel setup: import repo, set **Root Directory** to `frontend`, add env `VITE_API_URL=https://microfinance-backend-5y3w.onrender.com`, deploy. Update Render `CORS_ORIGIN` with your Vercel URL.
+
 ## Savings balances
 
 Savings account balances are updated when deposits and withdrawals are recorded (including initial opening deposits at account creation). Balances are **not** recalculated from transaction history automatically.

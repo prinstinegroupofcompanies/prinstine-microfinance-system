@@ -72,6 +72,8 @@ if (process.env.NODE_ENV === 'production') {
   }
   // Allow all Render domains in production (regex pattern)
   allowedOrigins.push(/^https:\/\/.*\.onrender\.com$/);
+  // Allow Vercel preview and production deployments
+  allowedOrigins.push(/^https:\/\/.*\.vercel\.app$/);
   // Allow custom domains (common patterns)
   // Note: This is a fallback - specific domains should be added via CUSTOM_DOMAIN env var
 }
