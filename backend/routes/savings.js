@@ -25,11 +25,13 @@ router.post(
       const sample = (result.restored_accounts || []).slice(0, 50);
       return res.json({
         success: true,
-        message: `Restore finished. ${result.restored} of ${result.checked} account(s) updated.`,
+        message: `Restore finished. ${result.restored} of ${result.checked} account(s) updated. Orphans relinked: ${result.orphans_relinked ?? 0}.`,
         data: {
           checked: result.checked,
           restored: result.restored,
-          skipped_no_opening_txn: result.skipped_no_opening_txn,
+          unchanged: result.unchanged,
+          no_activity: result.no_activity,
+          orphans_relinked: result.orphans_relinked,
           restored_accounts_sample: sample,
           sample_truncated: (result.restored_accounts || []).length > sample.length
         }
