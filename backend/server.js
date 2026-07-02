@@ -381,17 +381,22 @@ db.sequelize.authenticate()
     return Promise.resolve();
   })
   .then(async () => {
-    // Check if admin user exists, if not, seed the database
+    // Ensure the intended admin account exists and is up to date
     let adminExists = await db.User.findOne({
-      where: { email: 'admin@microfinance.com' }
+      where: { email: 'prinstineadmin@microfinance.com' }
     });
-    
+
     if (!adminExists) {
-      console.log('⚠️  Admin user not found. Seeding database...');
+      adminExists = await db.User.findOne({
+        where: { email: 'admin@microfinance.com' }
+      });
+    }
+
+    if (!adminExists) {
+      console.log('⚠️  Admin user not found. Creating primary admin account...');
       try {
         const bcrypt = require('bcryptjs');
-        
-        // Create branch if it doesn't exist
+
         const [branch] = await db.Branch.findOrCreate({
           where: { code: 'MB001' },
           defaults: {
@@ -408,106 +413,77 @@ db.sequelize.authenticate()
           }
         });
 
-        // Create admin user
-        const adminPassword = await bcrypt.hash('admin123', 10);
-        const [adminUser, adminCreated] = await db.User.findOrCreate({
-          where: { email: 'admin@microfinance.com' },
-          defaults: {
-            name: 'Admin User',
-            email: 'admin@microfinance.com',
-            username: 'admin',
-            password: adminPassword,
-            role: 'admin',
-            branch_id: branch.id,
-            is_active: true,
-            email_verified_at: new Date()
-          }
-        });
-        
-        if (adminCreated) {
-          console.log('✅ Admin user created successfully!');
-        } else {
-          console.log('✅ Admin user already exists.');
-        }
-
-        // Create developer user if missing
-        const developerPassword = await bcrypt.hash('Kamara@199', 10);
-        const [developerUser, developerCreated] = await db.User.findOrCreate({
-          where: { email: 'developerkamara1998@gmail.com' },
-          defaults: {
-            name: 'Developer',
-            email: 'developerkamara1998@gmail.com',
-            username: 'developer',
-            password: developerPassword,
-            role: 'admin',
-            branch_id: branch.id,
-            is_active: true,
-            email_verified_at: new Date()
-          }
+        const adminPassword = await bcrypt.hash('prinstineadminsinkor@199', 10);
+        adminExists = await db.User.create({
+          name: 'Admin User',
+          email: 'prinstineadmin@microfinance.com',
+          username: 'prinstineadmin',
+          password: adminPassword,
+          role: 'admin',
+          branch_id: branch.id,
+          is_active: true,
+          email_verified_at: new Date()
         });
 
-        if (developerCreated) {
-          console.log('✅ Developer user created successfully!');
-        } else {
-          console.log('✅ Developer user already exists.');
-        }
-        
-        // Verify the admin user was created
-        adminExists = await db.User.findOne({
-          where: { email: 'admin@microfinance.com' }
-        });
-        
-        if (adminExists) {
-          console.log('✅ Admin user verified in database.');
-          console.log('📧 Default admin credentials:');
-          console.log('   Email: admin@microfinance.com');
-          console.log('   Password: admin123');
-          console.log('   User ID:', adminExists.id);
-          console.log('   Is Active:', adminExists.is_active);
-        } else {
-          console.error('❌ Admin user creation failed - user not found after creation');
-        }
+        console.log('✅ Primary admin user created successfully!');
       } catch (seedError) {
-        console.error('❌ Seeding failed:', seedError);
-        console.error('Error stack:', seedError.stack);
-        // Don't exit - continue with server start
+        console.error('❌ Admin account creation failed:', seedError);
       }
     } else {
-      console.log('✅ Admin user exists. Database ready.');
-      console.log('📧 Admin credentials:');
-      console.log('   Email: admin@microfinance.com');
-      console.log('   Password: admin123');
-      console.log('   User ID:', adminExists.id);
-      console.log('   Is Active:', adminExists.is_active);
-
-      // Ensure developer user also exists when admin already exists
-      try {
-        const bcrypt = require('bcryptjs');
-        const developerPassword = await bcrypt.hash('Kamara@199', 10);
-        const [developerUser, developerCreated] = await db.User.findOrCreate({
-          where: { email: 'developerkamara1998@gmail.com' },
-          defaults: {
-            name: 'Developer',
-            email: 'developerkamara1998@gmail.com',
-            username: 'developer',
-            password: developerPassword,
-            role: 'admin',
-            branch_id: adminExists.branch_id,
-            is_active: true,
-            email_verified_at: new Date()
-          }
-        });
-
-        if (developerCreated) {
-          console.log('✅ Developer user created successfully!');
-        } else {
-          console.log('✅ Developer user already exists.');
-        }
-      } catch (devSeedError) {
-        console.error('❌ Developer seeding failed:', devSeedError);
-      }
+      const bcrypt = require('bcryptjs');
+      const adminPassword = await bcrypt.hash('prinstineadminsinkor@199', 10);
+      await adminExists.update({
+        name: 'Admin User',
+        email: 'prinstineadmin@microfinance.com',
+        username: 'prinstineadmin',
+        password: adminPassword,
+        role: 'admin',
+        is_active: true,
+        email_verified_at: new Date()
+      });
     }
-    
+
+    const primaryAdmin = await db.User.findOne({
+      where: { email: 'prinstineadmin@microfinance.com' }
+    });
+
+    if (primaryAdmin) {
+      console.log('✅ Primary admin user ready.');
+      console.log('📧 Admin credentials:');
+      console.log('   Email: prinstineadmin@microfinance.com');
+      console.log('   Username: prinstineadmin');
+      console.log('   Password: prinstineadminsinkor@199');
+      console.log('   User ID:', primaryAdmin.id);
+      console.log('   Is Active:', primaryAdmin.is_active);
+    }
+
+    // Ensure developer user also exists when admin already exists
+    try {
+      const bcrypt = require('bcryptjs');
+      const developerPassword = await bcrypt.hash('Kamara@199', 10);
+      const [developerUser, developerCreated] = await db.User.findOrCreate({
+        where: { email: 'developerkamara1998@gmail.com' },
+        defaults: {
+          name: 'Developer',
+          email: 'developerkamara1998@gmail.com',
+          username: 'developer',
+          password: developerPassword,
+          role: 'admin',
+          branch_id: primaryAdmin ? primaryAdmin.branch_id : null,
+          is_active: true,
+          email_verified_at: new Date()
+        }
+      });
+
+      if (developerCreated) {
+        console.log('✅ Developer user created successfully!');
+      } else {
+        console.log('✅ Developer user already exists.');
+      }
+    } catch (devSeedError) {
+      console.error('❌ Developer seeding failed:', devSeedError);
+    }
+
     return Promise.resolve();
   })
   .then(async () => {
