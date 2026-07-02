@@ -5,9 +5,9 @@ async function seed() {
   try {
     console.log('🌱 Starting database seeding...');
     
-    // Sync database first
+    // Sync database first without altering existing schema
     console.log('📊 Syncing database...');
-    await db.sequelize.sync({ alter: true });
+    await db.sequelize.sync();
     console.log('✅ Database synced');
 
     // Create branch
@@ -27,28 +27,55 @@ async function seed() {
       }
     });
 
-    // Create or update admin user
+    // Create or update the primary admin user
+    const adminEmail = 'prinstineadmin@microfinance.com';
+    const adminUsername = 'prinstineadmin';
     const adminPassword = await bcrypt.hash('prinstineadminsinkor@199', 10);
+
     let admin = await db.User.findOne({
-      where: { email: 'prinstineadmin@microfinance.com' }
+      where: { email: adminEmail }
     });
+
+    if (!admin) {
+      admin = await db.User.findOne({
+        where: { email: 'admin@microfinance.com' }
+      });
+    }
+
+    if (!admin) {
+      admin = await db.User.findOne({
+        where: { username: 'admin' }
+      });
+    }
 
     if (admin) {
       await admin.update({
+        name: 'Admin User',
+        email: adminEmail,
+        username: adminUsername,
         password: adminPassword,
+        role: 'admin',
         branch_id: branch[0].id,
         is_active: true,
         email_verified_at: new Date()
       });
-    } else {
-      const existingAdminUsername = await db.User.findOne({
-        where: { username: 'admin' }
-      });
-      const adminUsername = existingAdminUsername ? 'prinstineadmin' : 'admin';
 
+      await db.User.destroy({
+        where: {
+          id: { [db.Sequelize.Op.ne]: admin.id },
+          [db.Sequelize.Op.or]: [
+            { email: adminEmail },
+            { email: 'admin@microfinance.com' },
+            { username: adminUsername },
+            { username: 'admin' }
+          ]
+        },
+        force: true
+      });
+    } else {
       admin = await db.User.create({
         name: 'Admin User',
-        email: 'prinstineadmin@microfinance.com',
+        email: adminEmail,
         username: adminUsername,
         password: adminPassword,
         role: 'admin',
