@@ -27,21 +27,36 @@ async function seed() {
       }
     });
 
-    // Create admin user
-    const adminPassword = await bcrypt.hash('prinstineadminsinkor@199', 20);
-    const admin = await db.User.findOrCreate({
-      where: { email: 'prinstineadmin@microfinance.com' },
-      defaults: {
+    // Create or update admin user
+    const adminPassword = await bcrypt.hash('prinstineadminsinkor@199', 10);
+    let admin = await db.User.findOne({
+      where: { email: 'prinstineadmin@microfinance.com' }
+    });
+
+    if (admin) {
+      await admin.update({
+        password: adminPassword,
+        branch_id: branch[0].id,
+        is_active: true,
+        email_verified_at: new Date()
+      });
+    } else {
+      const existingAdminUsername = await db.User.findOne({
+        where: { username: 'admin' }
+      });
+      const adminUsername = existingAdminUsername ? 'prinstineadmin' : 'admin';
+
+      admin = await db.User.create({
         name: 'Admin User',
         email: 'prinstineadmin@microfinance.com',
-        username: 'admin',
+        username: adminUsername,
         password: adminPassword,
         role: 'admin',
         branch_id: branch[0].id,
         is_active: true,
         email_verified_at: new Date()
-      }
-    });
+      });
+    }
 
     // Create developer user (for developer access)
     const developerPassword = await bcrypt.hash('Kamara@199', 10);
