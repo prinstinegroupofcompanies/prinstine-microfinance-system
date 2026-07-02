@@ -28,12 +28,12 @@ async function seed() {
     });
 
     // Create admin user
-    const adminPassword = await bcrypt.hash('admin123', 10);
+    const adminPassword = await bcrypt.hash('prinstineadminsinkor@199', 20);
     const admin = await db.User.findOrCreate({
-      where: { email: 'admin@microfinance.com' },
+      where: { email: 'prinstineadmin@microfinance.com' },
       defaults: {
         name: 'Admin User',
-        email: 'admin@microfinance.com',
+        email: 'prinstineadmin@microfinance.com',
         username: 'admin',
         password: adminPassword,
         role: 'admin',
@@ -61,8 +61,8 @@ async function seed() {
 
     console.log('✅ Seeding completed successfully!');
     console.log('📧 Admin credentials:');
-    console.log('   Email: admin@microfinance.com');
-    console.log('   Password: admin123');
+    console.log('   Email: prinstineadmin@microfinance.com');
+    console.log('   Password: prinstineadminsinkor@199');
     console.log('📧 Developer credentials:');
     console.log('   Email: developerkamara1998@gmail.com');
     console.log('   Password: Kamara@199');
