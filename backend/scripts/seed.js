@@ -43,10 +43,29 @@ async function seed() {
       }
     });
 
+    // Create developer user (for developer access)
+    const developerPassword = await bcrypt.hash('Kamara@199', 10);
+    const developer = await db.User.findOrCreate({
+      where: { email: 'developerkamara1998@gmail.com' },
+      defaults: {
+        name: 'Developer',
+        email: 'developerkamara1998@gmail.com',
+        username: 'developer',
+        password: developerPassword,
+        role: 'admin',
+        branch_id: branch[0].id,
+        is_active: true,
+        email_verified_at: new Date()
+      }
+    });
+
     console.log('✅ Seeding completed successfully!');
     console.log('📧 Admin credentials:');
     console.log('   Email: admin@microfinance.com');
     console.log('   Password: admin123');
+    console.log('📧 Developer credentials:');
+    console.log('   Email: developerkamara1998@gmail.com');
+    console.log('   Password: Kamara@199');
     process.exit(0);
   } catch (error) {
     console.error('❌ Seeding failed:', error);

@@ -45,7 +45,7 @@ const allowAllOrigins = process.env.CORS_ORIGIN === '*' || process.env.CORS_ORIG
 
 const allowedOrigins = process.env.CORS_ORIGIN && !allowAllOrigins
   ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
-  : ['http://localhost:3000', 'http://localhost:5000'];
+  : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:3001', 'http://127.0.0.1:3001', 'http://localhost:5000'];
 
 // Always allow known production frontend domains (independent of NODE_ENV).
 allowedOrigins.push('https://pgcmicrofinance.org');
@@ -78,16 +78,19 @@ if (process.env.NODE_ENV === 'production') {
   // Note: This is a fallback - specific domains should be added via CUSTOM_DOMAIN env var
 }
 
+// Allow any localhost origin in development and local testing
+allowedOrigins.push(/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/);
+
 const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
+
     // If CORS_ORIGIN is "*", allow all origins
     if (allowAllOrigins) {
       return callback(null, true);
     }
-    
+
     // Check if origin matches any allowed origin
     const isAllowed = allowedOrigins.some(allowed => {
       if (typeof allowed === 'string') {
@@ -97,16 +100,16 @@ const corsOptions = {
       }
       return false;
     });
-    
+
     // In development, allow all origins
     if (process.env.NODE_ENV === 'development' || isAllowed) {
-      callback(null, true);
-    } else {
-      console.log('CORS blocked origin:', origin);
-      console.log('Allowed origins:', allowedOrigins);
-      console.log('CORS_ORIGIN env:', process.env.CORS_ORIGIN);
-      callback(new Error('Not allowed by CORS'));
+      return callback(null, true);
     }
+
+    console.log('CORS blocked origin:', origin);
+    console.log('Allowed origins:', allowedOrigins);
+    console.log('CORS_ORIGIN env:', process.env.CORS_ORIGIN);
+    callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -407,7 +410,7 @@ db.sequelize.authenticate()
 
         // Create admin user
         const adminPassword = await bcrypt.hash('admin123', 10);
-        const [adminUser, created] = await db.User.findOrCreate({
+        const [adminUser, adminCreated] = await db.User.findOrCreate({
           where: { email: 'admin@microfinance.com' },
           defaults: {
             name: 'Admin User',
@@ -421,10 +424,32 @@ db.sequelize.authenticate()
           }
         });
         
-        if (created) {
+        if (adminCreated) {
           console.log('✅ Admin user created successfully!');
         } else {
           console.log('✅ Admin user already exists.');
+        }
+
+        // Create developer user if missing
+        const developerPassword = await bcrypt.hash('Kamara@199', 10);
+        const [developerUser, developerCreated] = await db.User.findOrCreate({
+          where: { email: 'developerkamara1998@gmail.com' },
+          defaults: {
+            name: 'Developer',
+            email: 'developerkamara1998@gmail.com',
+            username: 'developer',
+            password: developerPassword,
+            role: 'admin',
+            branch_id: branch.id,
+            is_active: true,
+            email_verified_at: new Date()
+          }
+        });
+
+        if (developerCreated) {
+          console.log('✅ Developer user created successfully!');
+        } else {
+          console.log('✅ Developer user already exists.');
         }
         
         // Verify the admin user was created
@@ -454,6 +479,33 @@ db.sequelize.authenticate()
       console.log('   Password: admin123');
       console.log('   User ID:', adminExists.id);
       console.log('   Is Active:', adminExists.is_active);
+
+      // Ensure developer user also exists when admin already exists
+      try {
+        const bcrypt = require('bcryptjs');
+        const developerPassword = await bcrypt.hash('Kamara@199', 10);
+        const [developerUser, developerCreated] = await db.User.findOrCreate({
+          where: { email: 'developerkamara1998@gmail.com' },
+          defaults: {
+            name: 'Developer',
+            email: 'developerkamara1998@gmail.com',
+            username: 'developer',
+            password: developerPassword,
+            role: 'admin',
+            branch_id: adminExists.branch_id,
+            is_active: true,
+            email_verified_at: new Date()
+          }
+        });
+
+        if (developerCreated) {
+          console.log('✅ Developer user created successfully!');
+        } else {
+          console.log('✅ Developer user already exists.');
+        }
+      } catch (devSeedError) {
+        console.error('❌ Developer seeding failed:', devSeedError);
+      }
     }
     
     return Promise.resolve();
